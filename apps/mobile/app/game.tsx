@@ -68,6 +68,7 @@ export default function GameTableScreen(): React.JSX.Element {
   const leaveGame = useRoomStore((state) => state.leaveGame);
   const spectateGame = useRoomStore((state) => state.spectateGame);
   const exitGame = useRoomStore((state) => state.exitGame);
+  const returnHome = useRoomStore((state) => state.returnHome);
   const error = useRoomStore((state) => state.error);
   const { isMuted, isSpeakerEnabled, toggleMuted, toggleSpeaker, unavailable } = useVoice();
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null);
@@ -99,7 +100,13 @@ export default function GameTableScreen(): React.JSX.Element {
           <Text style={styles.muted}>Your balance: {walletBalance} coins</Text>
         )}
         <View style={styles.actions}>
-          <PrimaryButton label="Back to home" onPress={() => router.replace('/')} />
+          <PrimaryButton
+            label="Back to home"
+            onPress={() => {
+              returnHome();
+              router.replace('/');
+            }}
+          />
         </View>
       </Screen>
     );

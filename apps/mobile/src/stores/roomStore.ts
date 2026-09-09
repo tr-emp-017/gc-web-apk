@@ -46,6 +46,7 @@ type RoomStore = {
   kickPlayer: (targetPlayerId: string) => Promise<boolean>;
   exitGame: () => Promise<boolean>;
   restoreSession: () => Promise<boolean>;
+  returnHome: () => void;
 };
 
 const serverUrl = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:3000';
@@ -290,5 +291,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         resolve(true);
       });
     });
+  },
+  returnHome: () => {
+    clearSession();
+    set({ room: null, gameState: null, playerId: null, error: null });
   },
 }));
