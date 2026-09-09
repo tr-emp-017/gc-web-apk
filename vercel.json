@@ -1,5 +1,5 @@
 {
-  "buildCommand": "pnpm --filter @gadha-chor/shared-types build && pnpm --filter @gadha-chor/shared-utils build && pnpm --filter @gadha-chor/mobile export:web",
+  "buildCommand": "pnpm --filter @gadha-chor/game-engine build && pnpm --filter @gadha-chor/shared-types build && pnpm --filter @gadha-chor/shared-utils build && pnpm --filter @gadha-chor/mobile export:web",
   "outputDirectory": "apps/mobile/dist",
   "installCommand": "pnpm install --frozen-lockfile",
   "framework": null
