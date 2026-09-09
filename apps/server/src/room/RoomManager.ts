@@ -352,6 +352,14 @@ export class RoomManager {
     return this.publicGameState(room, playerId);
   }
 
+  getPublicGameStateIfStarted(code: string, playerId: string): PublicGameState | undefined {
+    const room = this.getRoom(code);
+    if (room.game === undefined) {
+      return undefined;
+    }
+    return this.publicGameState(room, playerId);
+  }
+
   getPlayer(code: string, playerId: string): RoomPlayerSnapshot {
     const room = this.getRoom(code);
     const player = this.getPlayerFromRoom(room, playerId);

@@ -10,6 +10,7 @@ import type {
   AvatarId,
   ReactionId,
 } from '@gadha-chor/shared-types';
+import { clearSession, loadSession, saveSession } from '../utils/sessionStorage';
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -44,6 +45,7 @@ type RoomStore = {
   spectateGame: () => Promise<boolean>;
   kickPlayer: (targetPlayerId: string) => Promise<boolean>;
   exitGame: () => Promise<boolean>;
+  restoreSession: () => Promise<boolean>;
 };
 
 const serverUrl = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:3000';
@@ -82,6 +84,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
     socket.on('wallet:updated', ({ balance }) => set({ walletBalance: balance }));
     socket.on('room:kicked', () => {
+      clearSession();
       set({
         room: null,
         gameState: null,
@@ -106,6 +109,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
           return;
         }
         if (response.ok) {
+          saveSession({ code: response.room.code, playerId: response.playerId });
           set({
             room: response.room,
             playerId: response.playerId,
@@ -128,6 +132,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
           return;
         }
         if (response.ok) {
+          saveSession({ code: response.room.code, playerId: response.playerId });
           set({
             room: response.room,
             playerId: response.playerId,
@@ -209,6 +214,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
           resolve(false);
           return;
         }
+        clearSession();
         set({ error: null, room: null, gameState: null });
         resolve(true);
       });
@@ -254,7 +260,33 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
           resolve(false);
           return;
         }
+        clearSession();
         set({ error: null, room: null, gameState: null });
+        resolve(true);
+      });
+    });
+  },
+  restoreSession: () => {
+    const stored = loadSession();
+    if (stored === null) {
+      return Promise.resolve(false);
+    }
+    const socket = get().connect();
+    return new Promise((resolve) => {
+      socket.emit('game:reconnect', stored, (response) => {
+        if (!response.ok) {
+          clearSession();
+          resolve(false);
+          return;
+        }
+        saveSession({ code: response.room.code, playerId: response.playerId });
+        set({
+          room: response.room,
+          playerId: response.playerId,
+          walletBalance: response.walletBalance,
+          gameState: response.state ?? null,
+          error: null,
+        });
         resolve(true);
       });
     });

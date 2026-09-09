@@ -150,6 +150,26 @@ describe('RoomManager', () => {
     expect(manager.getPlayer(host.code, host.playerId).connected).toBe(true);
   });
 
+  it('returns no game state on reconnect when the game has not started yet', () => {
+    const manager = new RoomManager();
+    const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
+
+    expect(manager.getPublicGameStateIfStarted(host.code, host.playerId)).toBeUndefined();
+  });
+
+  it('returns the game state on reconnect once the game has started', () => {
+    const manager = new RoomManager();
+    const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
+    const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
+    const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+    manager.setReady(host.code, second.playerId, true);
+    manager.setReady(host.code, third.playerId, true);
+    manager.startGame(host.code, host.playerId);
+
+    const state = manager.getPublicGameStateIfStarted(host.code, host.playerId);
+    expect(state?.status).toBe('PLAYING');
+  });
+
   it('expires disconnected players after the reconnect window', () => {
     vi.useFakeTimers();
     const manager = new RoomManager(1000);

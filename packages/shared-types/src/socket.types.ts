@@ -180,7 +180,7 @@ export type RoomResponse =
       readonly room: RoomSummary;
       readonly playerId: string;
       readonly walletBalance: number;
-      readonly state?: PublicGameState;
+      readonly state?: PublicGameState | undefined;
     }
   | { readonly ok: false; readonly error: string };
 

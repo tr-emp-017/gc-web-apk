@@ -1,7 +1,8 @@
-import { useRouter } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
-import { PrimaryButton } from '../src/components/PrimaryButton';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { Screen, palette } from '../src/components/Screen';
+
+import { PrimaryButton } from '../src/components/PrimaryButton';
+import { useRouter } from 'expo-router';
 
 export default function HomeScreen(): React.JSX.Element {
   const router = useRouter();
@@ -14,10 +15,12 @@ export default function HomeScreen(): React.JSX.Element {
         <Text style={styles.subtitle}>Lose your cards. Keep your dignity.</Text>
       </View>
 
-      <View style={styles.cardMark}>
-        <Text style={styles.cardSuit}>♠</Text>
-        <Text style={styles.cardRank}>A</Text>
-      </View>
+      <Image
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- static image asset
+        source={require('../assets/gadha-hero.jpg')}
+        resizeMode="cover"
+        style={styles.heroImage}
+      />
 
       <View style={styles.actions}>
         <PrimaryButton label="Create a room" onPress={() => router.push('/room/create')} />
@@ -38,30 +41,6 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 'auto',
   },
-  cardMark: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: palette.white,
-    borderColor: '#DED8CC',
-    borderRadius: 20,
-    borderWidth: 1,
-    height: 188,
-    justifyContent: 'center',
-    marginTop: 40,
-    transform: [{ rotate: '-7deg' }],
-    width: 132,
-  },
-  cardRank: {
-    color: palette.ink,
-    fontSize: 58,
-    fontWeight: '800',
-    lineHeight: 64,
-  },
-  cardSuit: {
-    color: palette.red,
-    fontSize: 42,
-    lineHeight: 44,
-  },
   footer: {
     color: palette.muted,
     fontSize: 13,
@@ -71,6 +50,13 @@ const styles = StyleSheet.create({
   },
   header: {
     marginTop: 12,
+  },
+  heroImage: {
+    alignSelf: 'center',
+    borderRadius: 20,
+    height: 220,
+    marginTop: 32,
+    width: 220,
   },
   kicker: {
     color: palette.red,

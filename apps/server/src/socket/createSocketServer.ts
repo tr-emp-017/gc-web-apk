@@ -87,7 +87,7 @@ export function createSocketServer(
         socket.data.code = room.code;
         socket.data.playerId = payload.playerId;
         void socket.join(room.code);
-        const state = roomManager.getPublicGameState(room.code, payload.playerId);
+        const state = roomManager.getPublicGameStateIfStarted(room.code, payload.playerId);
         callback({
           ok: true,
           room: roomManager.getRoomSummary(room.code),
