@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --filter @gadha-chor/shared-types build)",
+      "Bash(pnpm --filter @gadha-chor/server typecheck)",
+      "Bash(pnpm --filter @gadha-chor/server lint)",
+      "Bash(pnpm --filter @gadha-chor/server test)"
+    ]
+  }
+}

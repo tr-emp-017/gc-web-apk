@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: gadha-chor-server
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@gadha-chor/server
+    startCommand: pnpm --filter @gadha-chor/server start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+    healthCheckPath: /health
