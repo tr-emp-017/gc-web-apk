@@ -22,8 +22,28 @@ type SignalCandidate = {
   readonly sdpMLineIndex?: number | null;
 };
 
+// A STUN-only config only works when both peers can reach each other directly, which fails
+// across many real-world networks (mobile data, strict NATs). These free TURN relays (Open
+// Relay Project) act as a fallback so voice still connects in those cases.
 const rtcConfig = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+  ],
 };
 
 export class VoiceClient {
