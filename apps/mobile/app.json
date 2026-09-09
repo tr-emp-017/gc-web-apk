@@ -1,16 +1,24 @@
 {
-    "expo": {
-        "name": "Gadha Chor",
-        "slug": "gadha-chor",
-        "version": "0.1.0",
-        "orientation": "portrait",
-        "scheme": "gadha-chor",
-        "userInterfaceStyle": "automatic",
-        "android": {
-            "package": "com.gadhachor.app"
-        },
-        "plugins": [
-            "expo-router"
-        ]
+  "expo": {
+    "name": "Gadha Chor",
+    "slug": "gadha-chor",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "gadha-chor",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "com.gadhachor.app"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "6918a0af-4dc2-4d9d-9a7a-7a4947db3dc2"
+      }
     }
+  }
 }
