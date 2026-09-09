@@ -7,6 +7,7 @@
     "android": "expo start --android",
     "build": "tsc --noEmit -p tsconfig.json",
     "dev": "expo start",
+    "eas-build-post-install": "pnpm --filter @gadha-chor/game-engine build && pnpm --filter @gadha-chor/shared-types build && pnpm --filter @gadha-chor/shared-utils build",
     "export:web": "expo export -p web",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"
