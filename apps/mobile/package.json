@@ -35,6 +35,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
-    "@types/react": "^18.3.12"
+    "@types/react": "^18.3.12",
+    "expo-modules-autolinking": "~2.0.8"
   }
 }
