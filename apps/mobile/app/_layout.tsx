@@ -1,10 +1,21 @@
 import { Stack, useRouter } from 'expo-router';
 import { useEffect } from 'react';
+import { PermissionsAndroid, Platform } from 'react-native';
 import { useRoomStore } from '../src/stores/roomStore';
 
 export default function RootLayout(): React.JSX.Element {
   const router = useRouter();
   const restoreSession = useRoomStore((state) => state.restoreSession);
+
+  useEffect(() => {
+    // Ask for the mic up front, on app open, instead of leaving the first prompt to
+    // whenever voice chat happens to spin up mid-game. There's no separate Android
+    // permission for audio output/speaker — RECORD_AUDIO is the only one voice chat needs.
+    const recordAudioPermission = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+    if (Platform.OS === 'android' && recordAudioPermission !== undefined) {
+      void PermissionsAndroid.request(recordAudioPermission);
+    }
+  }, []);
 
   useEffect(() => {
     // Only ever attempt this once, on app boot — never react to later state changes,

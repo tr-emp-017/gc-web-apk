@@ -7,7 +7,16 @@
     "scheme": "gadha-chor",
     "userInterfaceStyle": "automatic",
     "android": {
-      "package": "com.gadhachor.app"
+      "package": "com.gadhachor.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "ACCESS_NETWORK_STATE",
+        "CHANGE_NETWORK_STATE",
+        "WAKE_LOCK",
+        "BLUETOOTH",
+        "BLUETOOTH_CONNECT"
+      ]
     },
     "plugins": [
       "expo-router"

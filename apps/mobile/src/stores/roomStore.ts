@@ -94,6 +94,29 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       });
     });
     socket.on('connect_error', (error) => set({ error: error.message }));
+    // A dropped/restored connection (tower handoff, wifi<->data switch, Render free-tier
+    // cold start) gets a brand-new server-side socket with no room/playerId attached to it.
+    // Re-run the reconnect handshake so the server re-attaches this socket to the room
+    // instead of leaving every subsequent action failing with "not connected to a room".
+    socket.io.on('reconnect', () => {
+      const stored = loadSession();
+      if (stored !== null) {
+        socket.emit('game:reconnect', stored, (response) => {
+          if (!response.ok) {
+            clearSession();
+            set({ room: null, gameState: null, playerId: null });
+            return;
+          }
+          set({
+            room: response.room,
+            playerId: response.playerId,
+            walletBalance: response.walletBalance,
+            gameState: response.state ?? null,
+            error: null,
+          });
+        });
+      }
+    });
     socket.connect();
     set({ socket });
     return socket;
