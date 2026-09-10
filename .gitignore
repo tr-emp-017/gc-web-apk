@@ -11,3 +11,4 @@ coverage/
 *.log
 .claude/
 .vscode/
+temp-logs
