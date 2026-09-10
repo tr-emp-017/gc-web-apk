@@ -80,6 +80,10 @@ type DraggableHandProps = {
   // Multiplies CARD_SCALE — shrinks the whole hand on a smaller table instead of holding a
   // fixed pixel size that dominates a small screen. Defaults to 1 (no change).
   readonly cardScale?: number;
+  // Multiplies the computed per-card overlap (fan spacing), independent of cardScale — lets
+  // a caller spread the cards further apart without changing their own size. Defaults to 1
+  // (no change).
+  readonly overlapMultiplier?: number;
 };
 
 export function DraggableHand({
@@ -89,6 +93,7 @@ export function DraggableHand({
   suitSortSignal,
   availableWidthPx,
   cardScale = 1,
+  overlapMultiplier = 1,
 }: DraggableHandProps): React.JSX.Element {
   const [order, setOrder] = useState<string[]>(() => cards.map((card) => card.id));
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -141,9 +146,10 @@ export function DraggableHand({
   // A hand this big can't shrink its way to fitting without becoming untappable — switch
   // to a fixed, comfortable overlap plus horizontal scroll navigation instead.
   const isScrollMode = orderedCards.length > HAND_SCROLL_CARD_THRESHOLD;
-  const overlapPx = isScrollMode
-    ? overlapPxForVisibleSliver(MAX_FAN_OVERLAP_PX * cardScale, cardScale)
-    : computeFanOverlapPx(orderedCards.length, availableWidthPx, cardScale);
+  const overlapPx =
+    (isScrollMode
+      ? overlapPxForVisibleSliver(MAX_FAN_OVERLAP_PX * cardScale, cardScale)
+      : computeFanOverlapPx(orderedCards.length, availableWidthPx, cardScale)) * overlapMultiplier;
   const rowWidthPx = overlapPx * Math.max(orderedCards.length - 1, 0);
   const fanContentWidthPx = rowWidthPx + CARD_WIDTH + SCROLL_EDGE_PADDING_PX * 2;
   const maxScrollOffsetPx = Math.max(0, fanContentWidthPx - availableWidthPx);
@@ -351,6 +357,14 @@ function DraggableCardItem({
     }),
   ).current;
 
+  // PlayingCard is scaled via a centered transform, so it paints past its own unscaled
+  // CARD_HEIGHT box both above and below by half the size increase. Left uncompensated,
+  // that upward bleed sits above this row's container and gets clipped by any ancestor
+  // that clips overflow (e.g. the scrollable hand) — cutting off the corner rank text,
+  // which sits near the very top of the card, while the suit glyph just below it survives.
+  // Nudging the box down by that same bleed amount re-centers the painted card at (0, CARD_HEIGHT).
+  const verticalBleedPx = (CARD_HEIGHT * (cardScale - 1)) / 2;
+
   return (
     <Animated.View
       accessibilityLabel={`Play ${card.rank} of ${card.suit}`}
@@ -361,6 +375,7 @@ function DraggableCardItem({
         {
           left: anchorLeft,
           marginLeft: offsetPx - CARD_WIDTH / 2,
+          top: verticalBleedPx,
           zIndex: isDragging ? 999 : zIndex,
         },
         !canPlay && styles.handCardDisabled,

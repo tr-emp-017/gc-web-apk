@@ -1,27 +1,26 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { Audio } from 'expo-av';
+import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 
 // Loads a sound effect once up front and hands back a function that replays it instantly,
 // instead of loading fresh from disk every time it's needed.
 export function useSound(assetModule: number): () => void {
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    Audio.Sound.createAsync(assetModule).then(({ sound }) => {
-      if (cancelled) {
-        void sound.unloadAsync();
-        return;
-      }
-      soundRef.current = sound;
-    });
+    const player = createAudioPlayer(assetModule);
+    playerRef.current = player;
     return () => {
-      cancelled = true;
-      void soundRef.current?.unloadAsync();
+      playerRef.current = null;
+      player.remove();
     };
   }, [assetModule]);
 
   return useCallback(() => {
-    void soundRef.current?.replayAsync();
+    const player = playerRef.current;
+    if (player === null) {
+      return;
+    }
+    void player.seekTo(0);
+    player.play();
   }, []);
 }

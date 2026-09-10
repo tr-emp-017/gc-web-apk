@@ -195,6 +195,10 @@ export type ServerToClientEvents = {
     readonly requesterId: string;
     readonly targetId: string;
     readonly accepted: boolean;
+    // How many cards moved — sent instead of the cards themselves so bystanders (and the
+    // giver, once their hand empties) never see hand contents that weren't theirs. 0 when
+    // declined.
+    readonly cardCount: number;
   }) => void;
 };
 

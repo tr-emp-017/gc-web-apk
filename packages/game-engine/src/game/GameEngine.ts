@@ -184,16 +184,10 @@ export class GameEngine {
     target.hand = [];
     this.finishPlayersWithNoCards();
 
-    if (this.checkGameOver()) {
-      return this.getState();
-    }
-
-    const nextLeaderId = nextActivePlayerId(this.state.players, requesterId);
-    if (nextLeaderId === undefined) {
-      throw new Error('No active player can lead the next Chaal.');
-    }
-    this.state.chaalLeaderId = nextLeaderId;
-    this.state.currentPlayerId = nextLeaderId;
+    // The turn deliberately does not move: the requester was already leading a fresh
+    // chaal and hasn't played a card, so nothing about whose turn it is has changed. They
+    // simply now lead with a bigger hand.
+    this.checkGameOver();
     return this.getState();
   }
 

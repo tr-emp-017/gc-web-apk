@@ -3,7 +3,7 @@
     "name": "Gadha Chor",
     "slug": "gadha-chor",
     "version": "0.1.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "scheme": "gadha-chor",
     "userInterfaceStyle": "automatic",
     "android": {
@@ -19,7 +19,11 @@
       ]
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-asset",
+      "expo-audio",
+      "expo-screen-orientation",
+      "expo-status-bar"
     ],
     "extra": {
       "router": {

@@ -432,6 +432,25 @@ describe('RoomManager', () => {
         leaderHandSize + targetHandSize,
       );
       expect(manager.getWalletBalance(targetId)).toBeGreaterThan(startingBalance);
+      // The leader hadn't played a card — taking a hand isn't a move, so play stays with them.
+      expect(state.currentPlayerId).toBe(leaderId);
+    });
+
+    it('rejects requesting a transfer once fewer than 3 players remain active', () => {
+      const manager = new RoomManager();
+      const { host, leadingState } = setUpLeadingGame(manager);
+      const leaderId = leadingState.currentPlayerId as string;
+      const [firstTargetId, secondTargetId] = leadingState.players
+        .filter((player) => player.id !== leaderId)
+        .map((player) => player.id) as [string, string];
+
+      manager.requestCardTransfer(host.code, leaderId, firstTargetId);
+      manager.respondCardTransfer(host.code, firstTargetId, true);
+
+      // Only the leader and secondTargetId are active now — below the 3-player floor.
+      expect(() => manager.requestCardTransfer(host.code, leaderId, secondTargetId)).toThrow(
+        /at least 3 active players/i,
+      );
     });
 
     it('leaves everything unchanged when the target declines', () => {

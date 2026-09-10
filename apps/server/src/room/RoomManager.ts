@@ -322,6 +322,15 @@ export class RoomManager {
     if (requesterId === targetId) {
       throw new Error('Choose another player to request cards from.');
     }
+    // With only 2 active players left, this would let the requester force an instant,
+    // one-sided finish (the target wins by emptying their hand, but the requester is then
+    // the sole active player and immediately becomes Gadha Chor) — skipping any real play.
+    // Re-validated here (not just hidden in the UI) since a client can't be trusted to
+    // enforce this on its own.
+    const activePlayerCount = state.players.filter((player) => player.status === 'ACTIVE').length;
+    if (activePlayerCount < 3) {
+      throw new Error('At least 3 active players are required to request someone’s cards.');
+    }
     const target = this.getPlayerFromRoom(room, targetId);
     const targetGamePlayer = state.players.find((player) => player.id === targetId);
     if (targetGamePlayer?.status !== 'ACTIVE') {
@@ -338,6 +347,7 @@ export class RoomManager {
   ): {
     requesterId: string;
     accepted: boolean;
+    cardCount: number;
     finishedPlayerIds: string[];
     rewards: Record<string, number>;
   } {
@@ -348,12 +358,25 @@ export class RoomManager {
     }
     delete room.pendingTransferRequest;
     if (!accept) {
-      return { accepted: false, finishedPlayerIds: [], requesterId: pending.requesterId, rewards: {} };
+      return {
+        accepted: false,
+        cardCount: 0,
+        finishedPlayerIds: [],
+        requesterId: pending.requesterId,
+        rewards: {},
+      };
     }
     if (room.game === undefined) {
       throw new Error('Game has not started.');
     }
     const previous = room.game.getState();
+    // Re-checked here too (not just at request time) — a third, unrelated player could have
+    // left in between, and this is the last point before the hand actually moves.
+    const activePlayerCount = previous.players.filter((player) => player.status === 'ACTIVE').length;
+    if (activePlayerCount < 3) {
+      throw new Error('At least 3 active players are required to complete this transfer.');
+    }
+    const cardCount = previous.players.find((player) => player.id === pending.targetId)?.hand.length ?? 0;
     const state = room.game.transferHand(pending.requesterId, pending.targetId);
     const finishedPlayerIds = state.players
       .filter((player) => player.status === 'FINISHED')
@@ -374,7 +397,7 @@ export class RoomManager {
         rewards[finishedPlayerId] = reward;
       }
     }
-    return { accepted: true, finishedPlayerIds, requesterId: pending.requesterId, rewards };
+    return { accepted: true, cardCount, finishedPlayerIds, requesterId: pending.requesterId, rewards };
   }
 
   getRoom(code: string): Room {

@@ -328,7 +328,7 @@ describe('transferHand', () => {
     engine.playCard('c', 'spades-3');
   }
 
-  it('moves the target hand to the requester, finishes the target, and passes the lead on', () => {
+  it('moves the target hand to the requester, finishes the target, and keeps the requester on turn', () => {
     const engine = GameEngine.createGame(players);
     engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
     leadFirstChaal(engine);
@@ -347,8 +347,10 @@ describe('transferHand', () => {
     expect(target?.hand).toHaveLength(0);
     expect(target?.status).toBe('FINISHED');
     expect(requester?.hand).toHaveLength(requesterHandSize + targetHandSize);
-    expect(state.currentPlayerId).toBe('c');
-    expect(state.chaalLeaderId).toBe('c');
+    // The requester was already leading a fresh, empty chaal and hasn't played a card —
+    // taking someone's hand doesn't count as a move, so the turn stays exactly where it was.
+    expect(state.currentPlayerId).toBe('a');
+    expect(state.chaalLeaderId).toBe('a');
   });
 
   it('rejects a request from a player who is not currently leading', () => {
@@ -388,7 +390,9 @@ describe('transferHand', () => {
     leadFirstChaal(engine);
     engine.transferHand('a', 'b');
 
-    expect(() => engine.transferHand('c', 'b')).toThrow(/not active/);
+    // The turn stayed with 'a' (it never moves on a transfer), so 'a' is still the only
+    // one who could legally request again — this time against the now-finished 'b'.
+    expect(() => engine.transferHand('a', 'b')).toThrow(/not active/);
   });
 
   it('ends the game and names the requester Gadha Chor when they take the last active hand', () => {
@@ -396,9 +400,10 @@ describe('transferHand', () => {
     engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
     leadFirstChaal(engine);
     engine.transferHand('a', 'b');
-    const state = engine.transferHand('c', 'a');
+    // Turn stayed with 'a', so 'a' can immediately request the last other active hand too.
+    const state = engine.transferHand('a', 'c');
 
     expect(state.status).toBe('GAME_OVER');
-    expect(state.gadhaChorId).toBe('c');
+    expect(state.gadhaChorId).toBe('a');
   });
 });

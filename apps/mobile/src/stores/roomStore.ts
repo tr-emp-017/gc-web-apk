@@ -35,6 +35,7 @@ export type TransferResolution = {
   readonly requesterId: string;
   readonly targetId: string;
   readonly accepted: boolean;
+  readonly cardCount: number;
 };
 
 export type InaamEvent = {
@@ -129,8 +130,8 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     socket.on('card:transferRequested', ({ requesterId, requesterName }) =>
       set({ incomingTransferRequest: { requesterId, requesterName } }),
     );
-    socket.on('card:transferResolved', ({ requesterId, targetId, accepted }) =>
-      set({ transferResolution: { accepted, requesterId, targetId } }),
+    socket.on('card:transferResolved', ({ requesterId, targetId, accepted, cardCount }) =>
+      set({ transferResolution: { accepted, cardCount, requesterId, targetId } }),
     );
     socket.on('room:kicked', () => {
       clearSession();

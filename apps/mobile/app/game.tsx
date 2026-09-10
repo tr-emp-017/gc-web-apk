@@ -2,6 +2,7 @@ import { Screen, palette } from '../src/components/Screen';
 import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Dimensions,
   Easing,
   ImageBackground,
   Modal,
@@ -11,14 +12,17 @@ import {
   Text,
   Vibration,
   View,
-  useWindowDimensions,
   type ImageStyle,
   type LayoutChangeEvent,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { NavigationBar } from 'expo-navigation-bar';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { PlayingCard, SUIT_SYMBOLS } from '../src/components/PlayingCard';
 import {
@@ -87,8 +91,22 @@ const OPPONENT_SEAT_LAYOUTS: Record<number, readonly SeatPosition[]> = {
 const ME_SEAT: SeatPosition = { x: 50, y: 92 };
 
 // The table fills the whole screen, letterboxed to this aspect ratio — same approach as
-// the dev-table-preview route this layout is ported from.
+// the dev-table-preview route this layout is ported from. Web keeps the original photo's
+// own 16:9 shape (unchanged). A typical phone's landscape viewport (after excluding system
+// bars) is considerably more elongated than that — as narrow as ~2.5:1 on some devices — so
+// staying locked to 16:9 there means most of the screen goes unused as letterboxing. Native
+// instead uses its own wider table image (poker-table-native.png, a stretched-middle/
+// untouched-rounded-ends variant of the same table so nothing looks distorted) at this
+// matching wider ratio, cutting that wasted margin down substantially across common Android
+// aspect ratios without fully eliminating it on any single device.
 const TABLE_ASPECT_RATIO = 16 / 9;
+const NATIVE_TABLE_ASPECT_RATIO = 2.4;
+// A bit more breathing room between hand cards on native than web's default fan spacing.
+const HAND_OVERLAP_MULTIPLIER_NATIVE = 1.2;
+// Small deliberate gap between the hand's bottom edge and the true screen edge on native —
+// enough to avoid looking pasted flush against the bezel, not enough to reintroduce the
+// large dead margin this was fixed to remove.
+const HAND_BOTTOM_MARGIN_NATIVE_PX = 10;
 // Table/thrown/discard-pile cards are rendered at "played" size and visually scaled up —
 // scaling is centered on each card's own box, so none of the position/centering math below
 // needs to change to account for it.
@@ -128,6 +146,14 @@ const INAAM_SWEEP_DURATION_MS = 900;
 // Fraction of the sweep's timeline spent staggering each card's start — later cards begin
 // later but all finish together, reading as "collected one after another".
 const INAAM_STAGGER_FRACTION = 0.35;
+// A "take all cards" transfer flies face-down, staggered, straight from the giver's seat
+// to the requester's seat — no gathering phase since it's a direct hand-to-hand move, not
+// a completed trick.
+const TRANSFER_SWEEP_DURATION_MS = 800;
+const TRANSFER_STAGGER_FRACTION = 0.4;
+// Cap how many individual card sprites fly for a big hand — the count badge still shows
+// the true number, this just keeps a 15+ card hand from rendering 15+ animated sprites.
+const TRANSFER_VISIBLE_CARD_CAP = 8;
 
 // Where the i-th of `total` played cards sits in the flat horizontal row across the
 // middle of the felt, as a percent of the table box — flat and non-rotated, matching the
@@ -139,8 +165,12 @@ function rowPosition(index: number, total: number, tableWidthPx: number, gapPx: 
   return { x: 50 + offsetPercent, y: TABLE_CARD_ROW_Y_PERCENT };
 }
 
-// The felt poker-table artwork is a web-only visual upgrade — native still uses the
-// plain wood-toned View below, unchanged.
+// Web uses the wood-framed photo, "cover"-cropped since a browser tab is always at least
+// as wide as the table's own 16:9 art. Native uses a transparent-background render of the
+// same table (poker-table-native.png, itself already 16:9) with "contain" instead — Android
+// phones span a much wider range of aspect ratios, and "cover" would crop the oval's rounded
+// ends unpredictably on ones that don't match; "contain" always shows the whole table, with
+// the surrounding `style.table` backgroundColor (already wood-toned) filling any letterbox.
 function TableWrap({
   children,
   onLayout,
@@ -152,25 +182,47 @@ function TableWrap({
   readonly style: StyleProp<ViewStyle>;
   readonly tableImageStyle: StyleProp<ImageStyle>;
 }): React.JSX.Element {
-  if (Platform.OS === 'web') {
-    return (
-      <ImageBackground
-        imageStyle={tableImageStyle}
-        onLayout={onLayout}
-        resizeMode="cover"
-        // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
-        source={require('../assets/poker-table.jpg')}
-        style={style}
-      >
-        {children}
-      </ImageBackground>
-    );
-  }
   return (
-    <View onLayout={onLayout} style={style}>
+    <ImageBackground
+      imageStyle={tableImageStyle}
+      onLayout={onLayout}
+      resizeMode={Platform.OS === 'web' ? 'cover' : 'contain'}
+      source={
+        Platform.OS === 'web'
+          ? // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+            require('../assets/poker-table.jpg')
+          : // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+            require('../assets/poker-table-native.png')
+      }
+      style={style}
+    >
       {children}
-    </View>
+    </ImageBackground>
   );
+}
+
+// RN's own `useWindowDimensions()` didn't reliably pick up the post-rotation size on
+// Android/Expo Go after `ScreenOrientation.lockAsync` programmatically rotates the device
+// (as opposed to the user physically turning the phone) — the table kept rendering at the
+// stale, pre-rotation (portrait) size. This re-reads `Dimensions.get('window')` on every
+// signal that could mean the layout changed: the standard dimensions-change event, AND every
+// `expo-screen-orientation` orientation-change event, which fires reliably once the OS-level
+// rotation this screen requested has actually completed.
+function useLiveWindowSize(): { readonly width: number; readonly height: number } {
+  const [size, setSize] = useState(() => Dimensions.get('window'));
+
+  useEffect(() => {
+    const sync = (): void => setSize(Dimensions.get('window'));
+    const dimensionsSubscription = Dimensions.addEventListener('change', sync);
+    const orientationSubscription =
+      Platform.OS === 'web' ? null : ScreenOrientation.addOrientationChangeListener(sync);
+    return () => {
+      dimensionsSubscription.remove();
+      orientationSubscription?.remove();
+    };
+  }, []);
+
+  return size;
 }
 
 export default function GameTableScreen(): React.JSX.Element {
@@ -197,25 +249,44 @@ export default function GameTableScreen(): React.JSX.Element {
   const lastInaam = useRoomStore((state) => state.lastInaam);
   const clearLastInaam = useRoomStore((state) => state.clearLastInaam);
   const { isMuted, isSpeakerEnabled, toggleMuted, toggleSpeaker, unavailable } = useVoice();
-  const { width: winWidth, height: winHeight } = useWindowDimensions();
+  const liveWindowSize = useLiveWindowSize();
+  // The root viewport below measures its OWN actual laid-out size via onLayout — that's the
+  // authoritative source once available, since it reflects a real completed native layout
+  // pass rather than a polled API. On this Android/Expo Go combo, even the dimensions-change
+  // + orientation-change listeners in useLiveWindowSize sometimes settle on a stale
+  // pre-rotation size after a *programmatic* (ScreenOrientation.lockAsync-driven) rotation;
+  // onLayout doesn't have that failure mode. useLiveWindowSize only covers the brief instant
+  // before the first layout pass reports in.
+  const [measuredViewport, setMeasuredViewport] = useState({ height: 0, width: 0 });
+  const winWidth = measuredViewport.width > 0 ? measuredViewport.width : liveWindowSize.width;
+  const winHeight = measuredViewport.height > 0 ? measuredViewport.height : liveWindowSize.height;
+  // This doesn't exclude the status bar / gesture-nav areas, which the table box below must
+  // avoid so the table and its buttons never end up drawn underneath system UI.
+  const insets = useSafeAreaInsets();
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
   const [suitSortSignal, setSuitSortSignal] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingTransferTargetId, setPendingTransferTargetId] = useState<string | null>(null);
 
-  // A resolved transfer (accepted or declined) clears whichever local "asking..." indicator
-  // is showing — the requester learns the outcome this way, since gameState itself already
-  // reflects an accepted transfer (the target's hand/status change) once it arrives.
+  // Force landscape the moment this screen mounts (entering the game), and hand
+  // orientation control back the moment it unmounts (leaving the game) — the lobby/home
+  // screens, and the app as a whole, are never touched. Native-only: app.json's top-level
+  // "orientation" is "default" (unrestricted) specifically so this per-screen lock can take
+  // effect on iOS, which otherwise enforces the manifest-level setting as a hard cap. Web
+  // keeps its existing desktop layout untouched, since orientation locking is a native concept.
   useEffect(() => {
-    if (transferResolution === null) {
+    if (Platform.OS === 'web') {
       return;
     }
-    if (transferResolution.requesterId === playerId) {
-      setPendingTransferTargetId(null);
-    }
-    clearTransferResolution();
-  }, [transferResolution, playerId, clearTransferResolution]);
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    return () => {
+      // Lock back to portrait (the app's original, app.json-level default for every other
+      // screen) rather than a bare unlockAsync(), which would leave free rotation active —
+      // the lobby/home screens were never designed for landscape.
+      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    };
+  }, []);
   const showCardCounts = room?.showCardCounts ?? false;
   // Null-safe stand-in for isMyTurn (computed properly below, once gameState is narrowed
   // non-null) — needed here because hooks must run unconditionally, before either early
@@ -235,13 +306,18 @@ export default function GameTableScreen(): React.JSX.Element {
     return layout?.[seatIndex] ?? { x: 50, y: 10 };
   };
 
-  // The whole screen is the table — letterboxed to TABLE_ASPECT_RATIO and centered,
-  // exactly like the dev-table-preview route this layout is ported from.
-  let boxWidth = winWidth;
-  let boxHeight = boxWidth / TABLE_ASPECT_RATIO;
-  if (boxHeight > winHeight) {
-    boxHeight = winHeight;
-    boxWidth = boxHeight * TABLE_ASPECT_RATIO;
+  // The table fills the safe area — letterboxed to TABLE_ASPECT_RATIO and centered within
+  // whatever space is left after excluding the status bar / notch / gesture-nav insets
+  // (all zero on web), rather than the full raw window. The outer viewport itself still
+  // spans the full window so its background bleeds edge-to-edge behind the system bars.
+  const availableWidth = winWidth - insets.left - insets.right;
+  const availableHeight = winHeight - insets.top - insets.bottom;
+  const tableAspectRatio = Platform.OS === 'web' ? TABLE_ASPECT_RATIO : NATIVE_TABLE_ASPECT_RATIO;
+  let boxWidth = availableWidth;
+  let boxHeight = boxWidth / tableAspectRatio;
+  if (boxHeight > availableHeight) {
+    boxHeight = availableHeight;
+    boxWidth = boxHeight * tableAspectRatio;
   }
   // Card sizing scales down proportionally on a smaller table instead of holding a fixed
   // pixel size that dominates a small screen.
@@ -307,11 +383,70 @@ export default function GameTableScreen(): React.JSX.Element {
   const inaamCardIdsInFlight =
     inaamAnimation !== null ? new Set(inaamAnimation.cards.map((play) => play.card.id)) : null;
 
+  // A "take all cards" transfer: cards fly face-down straight from the giver's seat to the
+  // requester's — the giver's hand and the requester's own hand/seat count must stay at
+  // their pre-transfer values until this lands, even though gameState already reflects it.
+  // `targetPreviousOwnCards` only applies when the viewer IS the giver (their own hand
+  // display can't be reconstructed from a count alone the way an opponent's card-back fan can).
+  const [transferAnimation, setTransferAnimation] = useState<{
+    readonly requesterId: string;
+    readonly targetId: string;
+    readonly cardCount: number;
+    readonly targetPreviousOwnCards: readonly VisibleCard[] | null;
+  } | null>(null);
+  const transferSweepAnim = useRef(new Animated.Value(0)).current;
+
   /* eslint-disable @typescript-eslint/no-require-imports -- static asset requires */
   const playTurnSound = useSound(require('../assets/turn-sound.mp3'));
   const playThrowSound = useSound(require('../assets/throw-sound.mp3'));
   const playCollectSound = useSound(require('../assets/collect-sound.mp3'));
   /* eslint-enable @typescript-eslint/no-require-imports */
+
+  // A resolved transfer (accepted or declined) clears whichever local "asking..." indicator
+  // is showing — the requester learns the outcome this way, since gameState itself already
+  // reflects an accepted transfer (the target's hand/status change) once it arrives. This
+  // event is guaranteed to arrive before the corresponding game:state update (the server
+  // emits it first), so `gameState` here is still the pre-transfer snapshot — safe to read
+  // for the giver's about-to-vanish hand.
+  useEffect(() => {
+    if (transferResolution === null) {
+      return;
+    }
+    if (transferResolution.requesterId === playerId) {
+      setPendingTransferTargetId(null);
+    }
+    if (transferResolution.accepted && transferResolution.cardCount > 0 && tableSize.width > 0) {
+      setTransferAnimation({
+        cardCount: transferResolution.cardCount,
+        requesterId: transferResolution.requesterId,
+        targetId: transferResolution.targetId,
+        targetPreviousOwnCards:
+          transferResolution.targetId === playerId ? (gameState?.ownCards ?? []) : null,
+      });
+      playCollectSound();
+      if (Platform.OS !== 'web') {
+        Vibration.vibrate(30);
+      }
+      Animated.timing(transferSweepAnim, {
+        duration: TRANSFER_SWEEP_DURATION_MS,
+        easing: Easing.inOut(Easing.cubic),
+        toValue: 1,
+        useNativeDriver: true,
+      }).start(() => {
+        setTransferAnimation(null);
+        transferSweepAnim.setValue(0);
+      });
+    }
+    clearTransferResolution();
+  }, [
+    transferResolution,
+    playerId,
+    clearTransferResolution,
+    gameState?.ownCards,
+    tableSize.width,
+    playCollectSound,
+    transferSweepAnim,
+  ]);
 
   // Play the alert sound and vibrate the device the moment it becomes your turn — not on
   // every render while it stays your turn, just the instant it changes.
@@ -540,18 +675,40 @@ export default function GameTableScreen(): React.JSX.Element {
   const myPlayer = gameState.players.find((player) => player.id === playerId);
   const showPostGameChoice = myPlayer?.status === 'FINISHED';
   const isMyTurn = gameState.currentPlayerId === playerId;
-  // Asking for someone's whole hand instead of a reaction only makes sense while leading a
-  // fresh chaal on your own turn (matches the server-side rule in RoomManager) — otherwise
-  // tapping an opponent's avatar still opens the reaction picker as before.
+  // Requesting someone's whole hand only makes sense while leading a fresh chaal on your
+  // own turn (matches the server-side rule in RoomManager), and — since the requester ends
+  // up as the sole active player and an instant Gadha Chor if it drops the game to 1 — only
+  // while at least 3 players are still active. The server re-validates both independently.
+  const activePlayerCount = gameState.players.filter((player) => player.status === 'ACTIVE').length;
   const canRequestCardTransfer =
-    isMyTurn && gameState.currentChaal.length === 0 && pendingTransferTargetId === null;
+    isMyTurn &&
+    !gameState.firstMovePending &&
+    gameState.currentChaal.length === 0 &&
+    activePlayerCount >= 3 &&
+    pendingTransferTargetId === null;
   // Cards an Inaam is currently carrying to you must stay out of your hand's display (and
   // its width math) until the sweep animation actually lands them, even though the server
-  // state has already added them.
-  const visibleOwnCards =
-    inaamCardIdsInFlight !== null && inaamAnimation?.receiverId === playerId
-      ? gameState.ownCards.filter((card) => !inaamCardIdsInFlight.has(card.id))
-      : gameState.ownCards;
+  // state has already added them. Same idea for a "take all cards" transfer: the giver keeps
+  // seeing their own about-to-vanish hand, and the requester's own hand holds back the last
+  // `cardCount` entries (freshly transferred cards are appended, per DraggableHand's own
+  // reconciliation) until the sweep lands.
+  const visibleOwnCards = (() => {
+    if (inaamCardIdsInFlight !== null && inaamAnimation?.receiverId === playerId) {
+      return gameState.ownCards.filter((card) => !inaamCardIdsInFlight.has(card.id));
+    }
+    if (transferAnimation !== null) {
+      if (transferAnimation.targetId === playerId && transferAnimation.targetPreviousOwnCards !== null) {
+        return transferAnimation.targetPreviousOwnCards;
+      }
+      if (transferAnimation.requesterId === playerId) {
+        return gameState.ownCards.slice(
+          0,
+          Math.max(0, gameState.ownCards.length - transferAnimation.cardCount),
+        );
+      }
+    }
+    return gameState.ownCards;
+  })();
 
   function handleExitTable(): void {
     const action = myPlayer?.status === 'ACTIVE' ? exitGame : leaveGame;
@@ -574,9 +731,30 @@ export default function GameTableScreen(): React.JSX.Element {
     -(handRowWidthPx / 2) - handVisualHalfWidthPx - MY_LABEL_GAP_PX - MY_LABEL_WIDTH_PX,
     minLabelOffsetPx,
   );
+  const tableTopPx = insets.top + (availableHeight - boxHeight) / 2;
+  // On native, the table box (letterboxed to NATIVE_TABLE_ASPECT_RATIO within the safe
+  // area) usually doesn't reach the true bottom of the screen. The hand is anchored inside
+  // the table's own coordinate space (so its width/centering still track the table), but is
+  // pushed down past the table's own bottom edge by this gap (minus a small deliberate
+  // margin) so it sits close to the real screen edge without looking pasted flush against
+  // it. Web's table already spans the full viewport height, so this gap is always 0 there
+  // and the original percentage-based anchor is left untouched.
+  const handBottomGapPx =
+    Platform.OS === 'web'
+      ? 0
+      : Math.max(0, winHeight - (tableTopPx + boxHeight) - HAND_BOTTOM_MARGIN_NATIVE_PX);
 
   return (
-    <View style={[styles.viewport, { height: winHeight, width: winWidth }]}>
+    <View
+      onLayout={(event) => setMeasuredViewport(event.nativeEvent.layout)}
+      style={styles.viewport}
+    >
+      {/* Hidden only while this screen is mounted — both restore automatically on unmount,
+          same declarative lifecycle as the orientation lock above. This also shrinks the
+          safe-area insets used for the table's own sizing below, since there's no longer a
+          status/nav bar reserving that space to avoid. */}
+      <StatusBar hidden />
+      <NavigationBar hidden />
       <Modal animationType="fade" transparent visible={showPostGameChoice}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
@@ -613,19 +791,13 @@ export default function GameTableScreen(): React.JSX.Element {
           <View style={styles.modalCard}>
             <Text style={styles.eyebrow}>CARD REQUEST</Text>
             <Text style={styles.title}>
-              {incomingTransferRequest?.requesterName ?? 'A player'} wants your cards
+              {incomingTransferRequest?.requesterName ?? 'A player'} wants to take all your cards
             </Text>
-            <Text style={styles.muted}>
-              Give them all your cards and you finish the game — you win! Don&apos;t worry, press
-              No if you&apos;d rather keep playing.
-            </Text>
+            <Text style={styles.muted}>Do you want to give all your cards?</Text>
             <View style={styles.actions}>
+              <PrimaryButton label="Confirm" onPress={() => void respondCardTransfer(true)} />
               <PrimaryButton
-                label="Yes, give my cards"
-                onPress={() => void respondCardTransfer(true)}
-              />
-              <PrimaryButton
-                label="No, keep playing"
+                label="Cancel"
                 onPress={() => void respondCardTransfer(false)}
                 variant="secondary"
               />
@@ -640,8 +812,8 @@ export default function GameTableScreen(): React.JSX.Element {
           styles.table,
           {
             height: boxHeight,
-            left: (winWidth - boxWidth) / 2,
-            top: (winHeight - boxHeight) / 2,
+            left: insets.left + (availableWidth - boxWidth) / 2,
+            top: tableTopPx,
             width: boxWidth,
           },
         ]}
@@ -742,41 +914,43 @@ export default function GameTableScreen(): React.JSX.Element {
           const seat = seatFor(player);
           const isTurn = player.id === gameState.currentPlayerId;
           const isOut = player.status === 'SPECTATING' || player.status === 'LEFT';
-          // While an Inaam is sweeping toward this player, hold their displayed count back
-          // to what it was before the transfer until the cards actually arrive.
-          const displayedCardsRemaining =
-            inaamCardIdsInFlight !== null && inaamAnimation?.receiverId === player.id
-              ? Math.max(0, player.cardsRemaining - inaamCardIdsInFlight.size)
-              : player.cardsRemaining;
+          // While an Inaam is sweeping toward this player, or a "take all cards" transfer is
+          // sweeping to/from them, hold their displayed count back to what it was before the
+          // transfer until the cards actually arrive.
+          const displayedCardsRemaining = (() => {
+            if (inaamCardIdsInFlight !== null && inaamAnimation?.receiverId === player.id) {
+              return Math.max(0, player.cardsRemaining - inaamCardIdsInFlight.size);
+            }
+            if (transferAnimation !== null) {
+              if (transferAnimation.targetId === player.id) {
+                return player.cardsRemaining + transferAnimation.cardCount;
+              }
+              if (transferAnimation.requesterId === player.id) {
+                return Math.max(0, player.cardsRemaining - transferAnimation.cardCount);
+              }
+            }
+            return player.cardsRemaining;
+          })();
           const fanCount = Math.max(1, Math.min(displayedCardsRemaining, 5));
           const canRequestFromThisPlayer =
             canRequestCardTransfer && !isOut && player.status === 'ACTIVE';
           return (
             <Pressable
-              accessibilityLabel={
-                canRequestFromThisPlayer
-                  ? `Ask ${player.name} to give you all their cards`
-                  : undefined
-              }
+              accessibilityLabel={`${player.name}'s profile`}
               key={player.id}
-              onPress={() => {
-                if (canRequestFromThisPlayer) {
-                  setPendingTransferTargetId(player.id);
-                  void requestCardTransfer(player.id);
-                  return;
-                }
-                setReactionTargetId((current) => (current === player.id ? null : player.id));
-              }}
+              onPress={() => setReactionTargetId((current) => (current === player.id ? null : player.id))}
               style={[styles.seat, { left: `${seat.x}%`, top: `${seat.y}%` }]}
             >
-              <View
-                style={[
-                  styles.playerAvatar,
-                  isTurn && styles.activeAvatar,
-                  isOut && styles.outAvatar,
-                ]}
-              >
-                <Text style={styles.playerAvatarText}>{AVATAR_SYMBOLS[player.avatar]}</Text>
+              <View style={styles.avatarWrap}>
+                <View
+                  style={[
+                    styles.playerAvatar,
+                    isTurn && styles.activeAvatar,
+                    isOut && styles.outAvatar,
+                  ]}
+                >
+                  <Text style={styles.playerAvatarText}>{AVATAR_SYMBOLS[player.avatar]}</Text>
+                </View>
               </View>
               <Text
                 adjustsFontSizeToFit
@@ -829,13 +1003,33 @@ export default function GameTableScreen(): React.JSX.Element {
                       <Text style={styles.reactionSymbol}>{REACTION_SYMBOLS[reaction]}</Text>
                     </Pressable>
                   ))}
+                  {canRequestFromThisPlayer && (
+                    <Pressable
+                      accessibilityLabel={`Request all of ${player.name}'s cards`}
+                      onPress={() => {
+                        setReactionTargetId(null);
+                        setPendingTransferTargetId(player.id);
+                        void requestCardTransfer(player.id).then((accepted) => {
+                          // The server rejected the request outright (e.g. a stale press
+                          // just after the turn moved on) — nothing was ever sent to the
+                          // target, so don't leave this player's screen stuck on "ASKING…".
+                          if (!accepted) {
+                            setPendingTransferTargetId(null);
+                          }
+                        });
+                      }}
+                      style={[styles.reactionButton, styles.requestCardsButton]}
+                    >
+                      <Ionicons color={palette.white} name="flag" size={15} />
+                    </Pressable>
+                  )}
                 </View>
               )}
             </Pressable>
           );
         })}
 
-        {myPlayer !== undefined && (
+        {myPlayer !== undefined && Platform.OS === 'web' && (
           <View
             style={[styles.seat, { left: '50%', marginLeft: myLabelOffsetPx, top: '80%', zIndex: 999 }]}
           >
@@ -1008,6 +1202,67 @@ export default function GameTableScreen(): React.JSX.Element {
               <Text style={styles.discardPileCount}>{discardPile.length}</Text>
             </View>
           )}
+
+          {transferAnimation !== null &&
+            (() => {
+              const originPlayer = gameState.players.find(
+                (candidate) => candidate.id === transferAnimation.targetId,
+              );
+              const destPlayer = gameState.players.find(
+                (candidate) => candidate.id === transferAnimation.requesterId,
+              );
+              const originSeat = originPlayer !== undefined ? seatFor(originPlayer) : ME_SEAT;
+              const destSeat = destPlayer !== undefined ? seatFor(destPlayer) : ME_SEAT;
+              const originX = (originSeat.x / 100) * tableSize.width;
+              const originY = (originSeat.y / 100) * tableSize.height;
+              const deltaX = (destSeat.x / 100) * tableSize.width - originX;
+              const deltaY = (destSeat.y / 100) * tableSize.height - originY;
+              const visibleCount = Math.min(transferAnimation.cardCount, TRANSFER_VISIBLE_CARD_CAP);
+
+              return Array.from({ length: visibleCount }).map((_, index) => {
+                // Same shared-driver stagger technique as the Inaam sweep: every card's own
+                // progress is derived from one Animated.Value so later cards start later but
+                // all land together, reading as "taken one after another".
+                const staggerOffset =
+                  visibleCount > 1 ? (index / (visibleCount - 1)) * TRANSFER_STAGGER_FRACTION : 0;
+                const progress = transferSweepAnim.interpolate({
+                  inputRange: [0, staggerOffset, 1],
+                  outputRange: [0, 0, 1],
+                  extrapolate: 'clamp',
+                });
+                const translateX = progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, deltaX],
+                });
+                const translateY = progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, deltaY],
+                });
+                const rotate = progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0deg', `${(index % 2 === 0 ? 1 : -1) * 14}deg`],
+                });
+                const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.55] });
+
+                return (
+                  <Animated.View
+                    key={`transfer-${index}`}
+                    style={[
+                      styles.playedCard,
+                      {
+                        left: `${originSeat.x}%`,
+                        top: `${originSeat.y}%`,
+                        marginLeft: -33 + index * 2,
+                        marginTop: -46 - index * 2,
+                        transform: [{ translateX }, { translateY }, { rotate }, { scale }],
+                      },
+                    ]}
+                  >
+                    <PlayingCard faceDown size="played" style={tableCardTransformStyle} />
+                  </Animated.View>
+                );
+              });
+            })()}
         </View>
 
         <View style={styles.sortButtonGroup}>
@@ -1021,13 +1276,23 @@ export default function GameTableScreen(): React.JSX.Element {
           </Pressable>
         </View>
 
-        <View style={styles.handWrap}>
+        <View
+          style={[
+            styles.handWrap,
+            Platform.OS !== 'web' && {
+              bottom: -handBottomGapPx,
+              marginTop: 0,
+              top: undefined,
+            },
+          ]}
+        >
           <DraggableHand
             availableWidthPx={handAvailableWidthPx}
             canPlay={isMyTurn}
             cardScale={responsiveScale}
             cards={visibleOwnCards}
             onPlay={(cardId) => void playCard(cardId)}
+            overlapMultiplier={Platform.OS === 'web' ? 1 : HAND_OVERLAP_MULTIPLIER_NATIVE}
             suitSortSignal={suitSortSignal}
           />
         </View>
@@ -1162,6 +1427,15 @@ const styles = StyleSheet.create({
     height: 36,
     justifyContent: 'center',
     width: 36,
+  },
+  avatarWrap: {
+    position: 'relative',
+  },
+  // A visually distinct entry in the profile popup — sending a "take all cards" request is
+  // a much bigger deal than a reaction, so it gets its own color instead of blending in
+  // with the emoji buttons.
+  requestCardsButton: {
+    backgroundColor: palette.red,
   },
   playerAvatarText: {
     color: palette.ink,
@@ -1362,8 +1636,12 @@ const styles = StyleSheet.create({
   },
   viewport: {
     backgroundColor: '#3B2A1E',
+    bottom: 0,
+    left: 0,
     overflow: 'hidden',
-    position: 'relative',
+    position: 'absolute',
+    right: 0,
+    top: 0,
   },
   wonText: {
     color: palette.saffron,

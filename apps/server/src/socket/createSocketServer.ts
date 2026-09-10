@@ -409,6 +409,7 @@ export function createSocketServer(
           requesterId: result.requesterId,
           targetId: session.playerId,
           accepted: result.accepted,
+          cardCount: result.cardCount,
         });
         if (!result.accepted) {
           return;

@@ -13,9 +13,17 @@ export default function JoinRoomScreen(): React.JSX.Element {
   const joinRoom = useRoomStore((state) => state.joinRoom);
   const error = useRoomStore((state) => state.error);
   const [name, setName] = useState(() => generateRandomGamerName());
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState('GC-');
   const [avatar, setAvatar] = useState<AvatarId>('sun');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Every room code the server generates is "GC-" followed by 4 digits, so keep that
+  // prefix always present — the player only ever needs to type the digits.
+  function handleCodeChange(text: string): void {
+    const withoutPrefix = text.toUpperCase().replace(/^GC-?/, '');
+    const digits = withoutPrefix.replace(/[^0-9]/g, '').slice(0, 4);
+    setCode(`GC-${digits}`);
+  }
 
   async function handleJoin(): Promise<void> {
     setIsSubmitting(true);
@@ -40,9 +48,9 @@ export default function JoinRoomScreen(): React.JSX.Element {
         <TextInput
           autoCapitalize="characters"
           autoCorrect={false}
+          keyboardType="number-pad"
           maxLength={7}
-          onChangeText={setCode}
-          placeholder="GC-4829"
+          onChangeText={handleCodeChange}
           placeholderTextColor="#9A958B"
           style={styles.input}
           value={code}
