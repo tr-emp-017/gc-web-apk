@@ -53,23 +53,39 @@ export class VoiceClient {
   private speakerEnabled = true;
   private started = false;
 
+  // Bound as instance properties (not inline in the constructor) so `stop()` can pass the
+  // exact same function references to `socket.off(...)` — otherwise these listeners would
+  // outlive this instance on the shared, long-lived socket (e.g. a React effect re-run from
+  // StrictMode or a reconnect), and a second VoiceClient's listeners would start cross-firing
+  // stale offers/answers against this instance's peer connections.
+  private readonly onPeerJoined: ServerToClientEvents['voice:peer-joined'];
+  private readonly onPeerLeft: ServerToClientEvents['voice:peer-left'];
+  private readonly onOffer: ServerToClientEvents['voice:offer'];
+  private readonly onAnswer: ServerToClientEvents['voice:answer'];
+  private readonly onIceCandidate: ServerToClientEvents['voice:ice-candidate'];
+
   constructor(
     private readonly socket: VoiceSocket,
     private readonly playerId: string,
   ) {
-    socket.on('voice:peer-joined', ({ playerId, initiator }) => {
+    this.onPeerJoined = ({ playerId, initiator }) => {
       void this.handlePeerJoined(playerId, initiator);
-    });
-    socket.on('voice:peer-left', ({ playerId }) => this.removePeer(playerId));
-    socket.on('voice:offer', ({ fromPlayerId, offer }) => {
+    };
+    this.onPeerLeft = ({ playerId }) => this.removePeer(playerId);
+    this.onOffer = ({ fromPlayerId, offer }) => {
       void this.handleOffer(fromPlayerId, offer);
-    });
-    socket.on('voice:answer', ({ fromPlayerId, answer }) => {
+    };
+    this.onAnswer = ({ fromPlayerId, answer }) => {
       void this.handleAnswer(fromPlayerId, answer);
-    });
-    socket.on('voice:ice-candidate', ({ fromPlayerId, candidate }) => {
+    };
+    this.onIceCandidate = ({ fromPlayerId, candidate }) => {
       void this.handleIceCandidate(fromPlayerId, candidate);
-    });
+    };
+    socket.on('voice:peer-joined', this.onPeerJoined);
+    socket.on('voice:peer-left', this.onPeerLeft);
+    socket.on('voice:offer', this.onOffer);
+    socket.on('voice:answer', this.onAnswer);
+    socket.on('voice:ice-candidate', this.onIceCandidate);
   }
 
   async start(): Promise<void> {
@@ -87,6 +103,11 @@ export class VoiceClient {
   }
 
   stop(): void {
+    this.socket.off('voice:peer-joined', this.onPeerJoined);
+    this.socket.off('voice:peer-left', this.onPeerLeft);
+    this.socket.off('voice:offer', this.onOffer);
+    this.socket.off('voice:answer', this.onAnswer);
+    this.socket.off('voice:ice-candidate', this.onIceCandidate);
     this.socket.emit('voice:leave');
     for (const playerId of this.peers.keys()) this.removePeer(playerId);
     for (const track of this.localStream?.getTracks() ?? []) track.stop();

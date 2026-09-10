@@ -153,6 +153,50 @@ export class GameEngine {
     return this.getState();
   }
 
+  // A player may, instead of leading a new chaal, ask another active player to hand over
+  // their entire remaining hand. The target empties out (finishing/winning immediately,
+  // same as playing their last card would), the requester's hand grows by that many cards,
+  // and the requester's turn is spent — the next active player leads the following chaal.
+  // Only allowed when leading (currentChaal empty) so it never leaves a chaal permanently
+  // one contribution short of completing.
+  transferHand(requesterId: string, targetId: string): GameState {
+    assertGameIsPlayable(this.state);
+    if (this.state.currentPlayerId !== requesterId) {
+      throw new Error("It is not this player's turn.");
+    }
+    if (this.state.firstMovePending) {
+      throw new Error('The first card must be the ace of spades.');
+    }
+    if (this.state.currentChaal.length > 0) {
+      throw new Error('Cards can only be requested when leading a new chaal.');
+    }
+    if (requesterId === targetId) {
+      throw new Error('Choose another player to request cards from.');
+    }
+
+    const requester = this.getPlayer(requesterId);
+    const target = this.getPlayer(targetId);
+    if (target.status !== 'ACTIVE') {
+      throw new Error('That player is not active in this game.');
+    }
+
+    requester.hand.push(...target.hand);
+    target.hand = [];
+    this.finishPlayersWithNoCards();
+
+    if (this.checkGameOver()) {
+      return this.getState();
+    }
+
+    const nextLeaderId = nextActivePlayerId(this.state.players, requesterId);
+    if (nextLeaderId === undefined) {
+      throw new Error('No active player can lead the next Chaal.');
+    }
+    this.state.chaalLeaderId = nextLeaderId;
+    this.state.currentPlayerId = nextLeaderId;
+    return this.getState();
+  }
+
   validateMove(playerId: string, cardId: string): boolean {
     try {
       assertGameIsPlayable(this.state);

@@ -320,3 +320,85 @@ describe('forceEndGame', () => {
     expect(() => engine.forceEndGame('nobody')).toThrow(/Unknown player/);
   });
 });
+
+describe('transferHand', () => {
+  function leadFirstChaal(engine: GameEngine): void {
+    engine.playCard('a', 'spades-14');
+    engine.playCard('b', 'spades-2');
+    engine.playCard('c', 'spades-3');
+  }
+
+  it('moves the target hand to the requester, finishes the target, and passes the lead on', () => {
+    const engine = GameEngine.createGame(players);
+    engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
+    leadFirstChaal(engine);
+
+    const before = engine.getState();
+    const requesterHandSize = before.players.find((player) => player.id === 'a')?.hand.length;
+    const targetHandSize = before.players.find((player) => player.id === 'b')?.hand.length;
+    if (requesterHandSize === undefined || targetHandSize === undefined) {
+      throw new Error('Missing test player.');
+    }
+
+    const state = engine.transferHand('a', 'b');
+
+    const target = state.players.find((player) => player.id === 'b');
+    const requester = state.players.find((player) => player.id === 'a');
+    expect(target?.hand).toHaveLength(0);
+    expect(target?.status).toBe('FINISHED');
+    expect(requester?.hand).toHaveLength(requesterHandSize + targetHandSize);
+    expect(state.currentPlayerId).toBe('c');
+    expect(state.chaalLeaderId).toBe('c');
+  });
+
+  it('rejects a request from a player who is not currently leading', () => {
+    const engine = GameEngine.createGame(players);
+    engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
+    leadFirstChaal(engine);
+
+    expect(() => engine.transferHand('b', 'c')).toThrow(/not this player's turn/);
+  });
+
+  it('rejects a request before the first card of the game has been played', () => {
+    const engine = GameEngine.createGame(players);
+    engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
+
+    expect(() => engine.transferHand('a', 'b')).toThrow(/ace of spades/);
+  });
+
+  it('rejects a request made mid-chaal', () => {
+    const engine = GameEngine.createGame(players);
+    engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
+    engine.playCard('a', 'spades-14');
+
+    expect(() => engine.transferHand('b', 'c')).toThrow(/leading a new chaal/);
+  });
+
+  it('rejects requesting your own hand', () => {
+    const engine = GameEngine.createGame(players);
+    engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
+    leadFirstChaal(engine);
+
+    expect(() => engine.transferHand('a', 'a')).toThrow(/another player/);
+  });
+
+  it('rejects targeting a player who already finished', () => {
+    const engine = GameEngine.createGame(players);
+    engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
+    leadFirstChaal(engine);
+    engine.transferHand('a', 'b');
+
+    expect(() => engine.transferHand('c', 'b')).toThrow(/not active/);
+  });
+
+  it('ends the game and names the requester Gadha Chor when they take the last active hand', () => {
+    const engine = GameEngine.createGame(players);
+    engine.startGame(deckWithHands([['spades-14'], ['spades-2'], ['spades-3']]));
+    leadFirstChaal(engine);
+    engine.transferHand('a', 'b');
+    const state = engine.transferHand('c', 'a');
+
+    expect(state.status).toBe('GAME_OVER');
+    expect(state.gadhaChorId).toBe('c');
+  });
+});

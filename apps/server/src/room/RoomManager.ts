@@ -3,10 +3,11 @@ import type {
   PublicGameState,
   PublicPlayer,
   RoomSummary,
+  VisibleCard,
 } from '@gadha-chor/shared-types';
 import { randomInt, randomUUID } from 'node:crypto';
 
-import { GameEngine } from '@gadha-chor/game-engine';
+import { GameEngine, determineChaalWinner } from '@gadha-chor/game-engine';
 import type { WalletLedger } from '../wallet/WalletLedger.js';
 import { InMemoryWalletLedger } from '../wallet/InMemoryWalletLedger.js';
 import { calculateWinnerReward } from '../wallet/reward.js';
@@ -31,6 +32,7 @@ type Room = {
   pool?: number;
   startedPlayerCount?: number;
   showCardCounts: boolean;
+  pendingTransferRequest?: { readonly requesterId: string; readonly targetId: string };
 };
 
 export type RoomPlayerSnapshot = RoomPlayer & { readonly isHost: boolean };
@@ -134,6 +136,7 @@ export class RoomManager {
     }
     player.connected = false;
     delete player.socketId;
+    this.clearPendingTransferIfInvolves(room, playerId);
     const timer = setTimeout(() => {
       room.reconnectTimers.delete(playerId);
       if (!player.connected) {
@@ -210,6 +213,9 @@ export class RoomManager {
     state: PublicGameState;
     isInaam: boolean;
     chaalWinnerId?: string | undefined;
+    completedChaal?: readonly { readonly playerId: string; readonly card: VisibleCard }[] | undefined;
+    inaamReceiverId?: string | undefined;
+    inaamCards?: readonly { readonly playerId: string; readonly card: VisibleCard }[] | undefined;
     leaderId?: string | undefined;
     finishedPlayerIds: string[];
     rewards: Record<string, number>;
@@ -217,6 +223,9 @@ export class RoomManager {
     const room = this.getRoom(code);
     if (room.game === undefined) {
       throw new Error('Game has not started.');
+    }
+    if (room.pendingTransferRequest !== undefined) {
+      throw new Error('A card transfer request is pending.');
     }
     const previous = room.game.getState();
     const previousPlayer = previous.players.find((player) => player.id === playerId);
@@ -226,6 +235,7 @@ export class RoomManager {
       previousPlayer !== undefined &&
       !previousPlayer.hand.some((card) => card.suit === requiredSuit) &&
       previousPlayer.hand.some((card) => card.id === cardId && card.suit !== requiredSuit);
+    const finishingCard = previousPlayer?.hand.find((card) => card.id === cardId);
     const state = room.game.playCard(playerId, cardId);
     const finishedPlayerIds = state.players
       .filter((player) => player.status === 'FINISHED')
@@ -246,17 +256,125 @@ export class RoomManager {
         rewards[finishedPlayerId] = reward;
       }
     }
+    const chaalJustCompleted =
+      !isInaam && previous.currentChaal.length > 0 && state.currentChaal.length === 0;
+    // Computed independently from determineChaalWinner (the same rule GameEngine applies
+    // internally) rather than read off state.chaalLeaderId afterward — an Inaam that also
+    // ends the game wipes chaalLeaderId, but the receiver still needs to be reported so the
+    // client can animate the cards to the right seat.
+    const inaamCards =
+      isInaam && finishingCard !== undefined
+        ? [
+            ...previous.currentChaal.map((play) => ({ playerId: play.playerId, card: play.card })),
+            { playerId, card: finishingCard },
+          ]
+        : undefined;
+    const inaamReceiverId =
+      inaamCards !== undefined
+        ? determineChaalWinner(
+            inaamCards.map((play) => ({ ...play, isInaam: play.playerId === playerId })),
+          )
+        : undefined;
     return {
       state: this.publicGameState(room, playerId),
       isInaam,
-      chaalWinnerId:
-        !isInaam && previous.currentChaal.length > 0 && state.currentChaal.length === 0
-          ? state.chaalLeaderId
+      chaalWinnerId: chaalJustCompleted ? state.chaalLeaderId : undefined,
+      completedChaal:
+        chaalJustCompleted && finishingCard !== undefined
+          ? [
+              ...previous.currentChaal.map((play) => ({ playerId: play.playerId, card: play.card })),
+              { playerId, card: finishingCard },
+            ]
           : undefined,
+      inaamReceiverId,
+      inaamCards,
       leaderId: previous.chaalLeaderId,
       finishedPlayerIds,
       rewards,
     };
+  }
+
+  // Asking someone to hand over their whole hand needs their sign-off — this just records
+  // the request and hands back their socket id so the caller can notify them; the actual
+  // hand transfer only happens once they call respondCardTransfer with accept=true.
+  requestCardTransfer(
+    code: string,
+    requesterId: string,
+    targetId: string,
+  ): { targetSocketId?: string | undefined } {
+    const room = this.getRoom(code);
+    if (room.game === undefined) {
+      throw new Error('Game has not started.');
+    }
+    if (room.pendingTransferRequest !== undefined) {
+      throw new Error('A card transfer request is already pending.');
+    }
+    const state = room.game.getState();
+    if (state.currentPlayerId !== requesterId) {
+      throw new Error("It is not this player's turn.");
+    }
+    if (state.firstMovePending) {
+      throw new Error('The first card must be the ace of spades.');
+    }
+    if (state.currentChaal.length > 0) {
+      throw new Error('Cards can only be requested when leading a new chaal.');
+    }
+    if (requesterId === targetId) {
+      throw new Error('Choose another player to request cards from.');
+    }
+    const target = this.getPlayerFromRoom(room, targetId);
+    const targetGamePlayer = state.players.find((player) => player.id === targetId);
+    if (targetGamePlayer?.status !== 'ACTIVE') {
+      throw new Error('That player is not active in this game.');
+    }
+    room.pendingTransferRequest = { requesterId, targetId };
+    return { targetSocketId: target.socketId };
+  }
+
+  respondCardTransfer(
+    code: string,
+    targetId: string,
+    accept: boolean,
+  ): {
+    requesterId: string;
+    accepted: boolean;
+    finishedPlayerIds: string[];
+    rewards: Record<string, number>;
+  } {
+    const room = this.getRoom(code);
+    const pending = room.pendingTransferRequest;
+    if (pending === undefined || pending.targetId !== targetId) {
+      throw new Error('There is no pending card transfer request for you to respond to.');
+    }
+    delete room.pendingTransferRequest;
+    if (!accept) {
+      return { accepted: false, finishedPlayerIds: [], requesterId: pending.requesterId, rewards: {} };
+    }
+    if (room.game === undefined) {
+      throw new Error('Game has not started.');
+    }
+    const previous = room.game.getState();
+    const state = room.game.transferHand(pending.requesterId, pending.targetId);
+    const finishedPlayerIds = state.players
+      .filter((player) => player.status === 'FINISHED')
+      .filter(
+        (player) =>
+          previous.players.find((oldPlayer) => oldPlayer.id === player.id)?.status !== 'FINISHED',
+      )
+      .map((player) => player.id);
+    const rewards: Record<string, number> = {};
+    if (
+      finishedPlayerIds.length > 0 &&
+      room.pool !== undefined &&
+      room.startedPlayerCount !== undefined
+    ) {
+      const reward = calculateWinnerReward(room.pool, room.startedPlayerCount);
+      for (const finishedPlayerId of finishedPlayerIds) {
+        this.walletLedger.credit(finishedPlayerId, reward);
+        rewards[finishedPlayerId] = reward;
+      }
+    }
+    return { accepted: true, finishedPlayerIds, requesterId: pending.requesterId, rewards };
   }
 
   getRoom(code: string): Room {
@@ -316,7 +434,18 @@ export class RoomManager {
     const player = this.getPlayerFromRoom(room, playerId);
     room.game.forceEndGame(playerId);
     player.postGameChoice = 'LEFT';
+    this.clearPendingTransferIfInvolves(room, playerId);
     return this.publicGameState(room, playerId);
+  }
+
+  // A pending "give me your hand" request left dangling because either side disconnected
+  // or exited would otherwise softlock playCard forever (it refuses to run while one is
+  // outstanding) — drop it so the game can continue normally.
+  private clearPendingTransferIfInvolves(room: Room, playerId: string): void {
+    const pending = room.pendingTransferRequest;
+    if (pending?.requesterId === playerId || pending?.targetId === playerId) {
+      delete room.pendingTransferRequest;
+    }
   }
 
   leaveGame(code: string, playerId: string): void {

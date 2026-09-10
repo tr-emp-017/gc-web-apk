@@ -365,4 +365,168 @@ describe('RoomManager', () => {
       expect(manager.endGameForExit(host.code, third.playerId)).toBeUndefined();
     });
   });
+
+  describe('requesting a card transfer', () => {
+    // Plays exactly one full chaal so the game settles back into "leading, chaal empty"
+    // state (the only state a transfer request can be made from) and returns whichever
+    // player is leading next.
+    function playOneChaal(manager: RoomManager, code: string, anyPlayerId: string): PublicGameState {
+      let state = manager.getPublicGameState(code, anyPlayerId);
+      const activeCount = state.players.filter((player) => player.status === 'ACTIVE').length;
+      for (let turn = 0; turn < activeCount; turn += 1) {
+        const currentPlayerId = state.currentPlayerId;
+        if (currentPlayerId === undefined) {
+          throw new Error('A playable game must have a current player.');
+        }
+        const viewerState = manager.getPublicGameState(code, currentPlayerId);
+        const playableCard = viewerState.firstMovePending
+          ? viewerState.ownCards.find((card) => card.suit === 'spades' && card.rank === 14)
+          : (viewerState.ownCards.find(
+              (card) =>
+                viewerState.requiredSuit === undefined || card.suit === viewerState.requiredSuit,
+            ) ?? viewerState.ownCards[0]);
+        if (playableCard === undefined) {
+          throw new Error('An active player must have a card to play.');
+        }
+        state = manager.playCard(code, currentPlayerId, playableCard.id).state;
+      }
+      return state;
+    }
+
+    function setUpLeadingGame(manager: RoomManager): {
+      host: { code: string; playerId: string };
+      second: { code: string; playerId: string };
+      third: { code: string; playerId: string };
+      leadingState: PublicGameState;
+    } {
+      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      manager.setReady(host.code, second.playerId, true);
+      manager.setReady(host.code, third.playerId, true);
+      manager.startGame(host.code, host.playerId);
+      const leadingState = playOneChaal(manager, host.code, host.playerId);
+      return { host, second, third, leadingState };
+    }
+
+    it('moves the hand over and rewards the target once the target accepts', () => {
+      const manager = new RoomManager();
+      const { host, leadingState } = setUpLeadingGame(manager);
+      const leaderId = leadingState.currentPlayerId as string;
+      const targetId = leadingState.players.find((player) => player.id !== leaderId)?.id as string;
+      const targetHandSize = leadingState.players.find((player) => player.id === targetId)
+        ?.cardsRemaining as number;
+      const leaderHandSize = leadingState.players.find((player) => player.id === leaderId)
+        ?.cardsRemaining as number;
+      const startingBalance = manager.getWalletBalance(targetId);
+
+      manager.requestCardTransfer(host.code, leaderId, targetId);
+      const result = manager.respondCardTransfer(host.code, targetId, true);
+
+      const state = manager.getPublicGameState(host.code, leaderId);
+      expect(result.accepted).toBe(true);
+      expect(result.requesterId).toBe(leaderId);
+      expect(state.players.find((player) => player.id === targetId)?.cardsRemaining).toBe(0);
+      expect(state.players.find((player) => player.id === targetId)?.status).toBe('FINISHED');
+      expect(state.players.find((player) => player.id === leaderId)?.cardsRemaining).toBe(
+        leaderHandSize + targetHandSize,
+      );
+      expect(manager.getWalletBalance(targetId)).toBeGreaterThan(startingBalance);
+    });
+
+    it('leaves everything unchanged when the target declines', () => {
+      const manager = new RoomManager();
+      const { host, leadingState } = setUpLeadingGame(manager);
+      const leaderId = leadingState.currentPlayerId as string;
+      const targetId = leadingState.players.find((player) => player.id !== leaderId)?.id as string;
+
+      manager.requestCardTransfer(host.code, leaderId, targetId);
+      const result = manager.respondCardTransfer(host.code, targetId, false);
+
+      const state = manager.getPublicGameState(host.code, leaderId);
+      expect(result.accepted).toBe(false);
+      expect(state.players.find((player) => player.id === targetId)?.status).toBe('ACTIVE');
+      expect(state.currentPlayerId).toBe(leaderId);
+      // The lead is free to play a normal card again once the request is resolved.
+      const card = state.ownCards.find(
+        (candidate) => state.requiredSuit === undefined || candidate.suit === state.requiredSuit,
+      );
+      expect(() => manager.playCard(host.code, leaderId, (card as { id: string }).id)).not.toThrow();
+    });
+
+    it('rejects a request from anyone other than the current leader', () => {
+      const manager = new RoomManager();
+      const { host, leadingState } = setUpLeadingGame(manager);
+      const leaderId = leadingState.currentPlayerId as string;
+      const [otherA, otherB] = leadingState.players
+        .filter((player) => player.id !== leaderId)
+        .map((player) => player.id);
+
+      expect(() =>
+        manager.requestCardTransfer(host.code, otherA as string, otherB as string),
+      ).toThrow(/not this player's turn/);
+    });
+
+    it('rejects a request made mid-chaal', () => {
+      const manager = new RoomManager();
+      const { host, leadingState } = setUpLeadingGame(manager);
+      const leaderId = leadingState.currentPlayerId as string;
+      const leaderView = manager.getPublicGameState(host.code, leaderId);
+      const card = leaderView.ownCards.find(
+        (candidate) =>
+          leaderView.requiredSuit === undefined || candidate.suit === leaderView.requiredSuit,
+      );
+      const afterOnePlay = manager.playCard(host.code, leaderId, (card as { id: string }).id).state;
+      const newCurrentPlayerId = afterOnePlay.currentPlayerId as string;
+      const someoneElse = afterOnePlay.players.find(
+        (player) => player.id !== newCurrentPlayerId,
+      )?.id as string;
+
+      expect(() =>
+        manager.requestCardTransfer(host.code, newCurrentPlayerId, someoneElse),
+      ).toThrow(/leading a new chaal/);
+    });
+
+    it('rejects a duplicate request while one is already pending, and blocks normal play too', () => {
+      const manager = new RoomManager();
+      const { host, leadingState } = setUpLeadingGame(manager);
+      const leaderId = leadingState.currentPlayerId as string;
+      const targetId = leadingState.players.find((player) => player.id !== leaderId)?.id as string;
+      manager.requestCardTransfer(host.code, leaderId, targetId);
+
+      expect(() => manager.requestCardTransfer(host.code, leaderId, targetId)).toThrow(
+        /already pending/,
+      );
+      const card = leadingState.ownCards[0] as { id: string };
+      expect(() => manager.playCard(host.code, leaderId, card.id)).toThrow(/pending/);
+    });
+
+    it('rejects responding when there is no pending request for that player', () => {
+      const manager = new RoomManager();
+      const { host, leadingState } = setUpLeadingGame(manager);
+      const leaderId = leadingState.currentPlayerId as string;
+
+      expect(() => manager.respondCardTransfer(host.code, leaderId, true)).toThrow(
+        /no pending card transfer/,
+      );
+    });
+
+    it('drops a pending request if the target disconnects, so the game does not get stuck', () => {
+      vi.useFakeTimers();
+      const manager = new RoomManager();
+      const { host, leadingState } = setUpLeadingGame(manager);
+      const leaderId = leadingState.currentPlayerId as string;
+      const targetId = leadingState.players.find((player) => player.id !== leaderId)?.id as string;
+      manager.requestCardTransfer(host.code, leaderId, targetId);
+
+      manager.disconnect(host.code, targetId, () => {});
+
+      const leaderView = manager.getPublicGameState(host.code, leaderId);
+      const card = leaderView.ownCards.find(
+        (candidate) =>
+          leaderView.requiredSuit === undefined || candidate.suit === leaderView.requiredSuit,
+      );
+      expect(() => manager.playCard(host.code, leaderId, (card as { id: string }).id)).not.toThrow();
+    });
+  });
 });

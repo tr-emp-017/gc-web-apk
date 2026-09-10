@@ -122,6 +122,14 @@ export type ClientToServerEvents = {
     payload: { readonly targetPlayerId: string; readonly reaction: ReactionId },
     callback: (response: ActionResponse) => void,
   ) => void;
+  'card:requestTransfer': (
+    payload: { readonly targetPlayerId: string },
+    callback: (response: ActionResponse) => void,
+  ) => void;
+  'card:respondTransfer': (
+    payload: { readonly accept: boolean },
+    callback: (response: ActionResponse) => void,
+  ) => void;
 };
 
 export type ServerToClientEvents = {
@@ -156,11 +164,18 @@ export type ServerToClientEvents = {
     readonly cardId: string;
     readonly isInaam: boolean;
   }) => void;
-  'chaal:completed': (payload: { readonly winnerId: string }) => void;
+  'chaal:completed': (payload: {
+    readonly winnerId: string;
+    readonly cards: readonly { readonly playerId: string; readonly card: VisibleCard }[];
+  }) => void;
   'inaam:given': (payload: {
     readonly playerId: string;
     readonly cardId: string;
     readonly leaderId: string;
+    // The player who actually receives every card in this chaal — whoever holds the
+    // highest card of the required suit, which is usually but not always the chaal leader.
+    readonly receiverId: string;
+    readonly cards: readonly { readonly playerId: string; readonly card: VisibleCard }[];
   }) => void;
   'player:finished': (payload: { readonly playerId: string; readonly reward: number }) => void;
   'wallet:updated': (payload: { readonly balance: number }) => void;
@@ -171,6 +186,15 @@ export type ServerToClientEvents = {
     readonly fromPlayerId: string;
     readonly targetPlayerId: string;
     readonly reaction: ReactionId;
+  }) => void;
+  'card:transferRequested': (payload: {
+    readonly requesterId: string;
+    readonly requesterName: string;
+  }) => void;
+  'card:transferResolved': (payload: {
+    readonly requesterId: string;
+    readonly targetId: string;
+    readonly accepted: boolean;
   }) => void;
 };
 

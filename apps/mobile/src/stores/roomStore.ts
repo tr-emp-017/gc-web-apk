@@ -9,6 +9,7 @@ import type {
   PublicGameState,
   AvatarId,
   ReactionId,
+  VisibleCard,
 } from '@gadha-chor/shared-types';
 import { clearSession, loadSession, saveSession } from '../utils/sessionStorage';
 
@@ -20,6 +21,28 @@ export type ReactionNotification = {
   readonly reaction: ReactionId;
 };
 
+export type CompletedChaal = {
+  readonly winnerId: string;
+  readonly cards: readonly { readonly playerId: string; readonly card: VisibleCard }[];
+};
+
+export type IncomingTransferRequest = {
+  readonly requesterId: string;
+  readonly requesterName: string;
+};
+
+export type TransferResolution = {
+  readonly requesterId: string;
+  readonly targetId: string;
+  readonly accepted: boolean;
+};
+
+export type InaamEvent = {
+  readonly giverId: string;
+  readonly receiverId: string;
+  readonly cards: readonly { readonly playerId: string; readonly card: VisibleCard }[];
+};
+
 type RoomStore = {
   readonly socket: GameSocket | null;
   readonly room: RoomSummary | null;
@@ -28,8 +51,15 @@ type RoomStore = {
   readonly error: string | null;
   readonly latestReaction: ReactionNotification | null;
   readonly walletBalance: number | null;
+  readonly lastCompletedChaal: CompletedChaal | null;
+  readonly incomingTransferRequest: IncomingTransferRequest | null;
+  readonly transferResolution: TransferResolution | null;
+  readonly lastInaam: InaamEvent | null;
   connect: () => GameSocket;
   clearError: () => void;
+  clearLastCompletedChaal: () => void;
+  clearTransferResolution: () => void;
+  clearLastInaam: () => void;
   createRoom: (
     name: string,
     avatar: AvatarId,
@@ -41,6 +71,8 @@ type RoomStore = {
   startGame: () => Promise<boolean>;
   playCard: (cardId: string) => Promise<boolean>;
   reactToPlayer: (targetPlayerId: string, reaction: ReactionId) => Promise<boolean>;
+  requestCardTransfer: (targetPlayerId: string) => Promise<boolean>;
+  respondCardTransfer: (accept: boolean) => Promise<boolean>;
   leaveGame: () => Promise<boolean>;
   spectateGame: () => Promise<boolean>;
   kickPlayer: (targetPlayerId: string) => Promise<boolean>;
@@ -63,6 +95,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   error: null,
   latestReaction: null,
   walletBalance: null,
+  lastCompletedChaal: null,
+  incomingTransferRequest: null,
+  transferResolution: null,
+  lastInaam: null,
   connect: () => {
     const existingSocket = get().socket;
     if (existingSocket !== null) {
@@ -84,6 +120,18 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       }, 5000);
     });
     socket.on('wallet:updated', ({ balance }) => set({ walletBalance: balance }));
+    socket.on('chaal:completed', ({ winnerId, cards }) =>
+      set({ lastCompletedChaal: { winnerId, cards } }),
+    );
+    socket.on('inaam:given', ({ playerId: giverId, receiverId, cards }) =>
+      set({ lastInaam: { cards, giverId, receiverId } }),
+    );
+    socket.on('card:transferRequested', ({ requesterId, requesterName }) =>
+      set({ incomingTransferRequest: { requesterId, requesterName } }),
+    );
+    socket.on('card:transferResolved', ({ requesterId, targetId, accepted }) =>
+      set({ transferResolution: { accepted, requesterId, targetId } }),
+    );
     socket.on('room:kicked', () => {
       clearSession();
       set({
@@ -122,6 +170,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     return socket;
   },
   clearError: () => set({ error: null }),
+  clearLastCompletedChaal: () => set({ lastCompletedChaal: null }),
+  clearLastInaam: () => set({ lastInaam: null }),
+  clearTransferResolution: () => set({ transferResolution: null }),
   createRoom: (name, avatar, entryPoints, showCardCounts) => {
     const socket = get().connect();
     return new Promise((resolve) => {
@@ -218,6 +269,37 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     return new Promise((resolve) => {
       socket.emit('player:react', { targetPlayerId, reaction }, (response) => {
         const error = responseError(response);
+        if (error !== null) {
+          set({ error });
+          resolve(false);
+          return;
+        }
+        set({ error: null });
+        resolve(true);
+      });
+    });
+  },
+  requestCardTransfer: (targetPlayerId) => {
+    const socket = get().connect();
+    return new Promise((resolve) => {
+      socket.emit('card:requestTransfer', { targetPlayerId }, (response) => {
+        const error = responseError(response);
+        if (error !== null) {
+          set({ error });
+          resolve(false);
+          return;
+        }
+        set({ error: null });
+        resolve(true);
+      });
+    });
+  },
+  respondCardTransfer: (accept) => {
+    const socket = get().connect();
+    return new Promise((resolve) => {
+      socket.emit('card:respondTransfer', { accept }, (response) => {
+        const error = responseError(response);
+        set({ incomingTransferRequest: null });
         if (error !== null) {
           set({ error });
           resolve(false);

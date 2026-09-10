@@ -72,8 +72,8 @@ type SizeSpec = {
 };
 
 const SIZE_SPECS: Record<CardSize, SizeSpec> = {
-  hand: { width: 58, height: 92, cornerFont: 13, pipFont: 10, centerFont: 30 },
-  played: { width: 52, height: 74, cornerFont: 11, pipFont: 8, centerFont: 24 },
+  hand: { width: 74, height: 112, cornerFont: 15, pipFont: 12, centerFont: 36 },
+  played: { width: 66, height: 92, cornerFont: 13, pipFont: 10, centerFont: 30 },
   mini: { width: 30, height: 44, cornerFont: 8, pipFont: 6, centerFont: 14 },
 };
 

@@ -1,10 +1,66 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LayoutRectangle } from 'react-native';
-import { Animated, PanResponder, StyleSheet, View } from 'react-native';
+import { Animated, PanResponder, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import type { VisibleCard as Card } from '@gadha-chor/shared-types';
+import { Ionicons } from '@expo/vector-icons';
 import { PlayingCard } from './PlayingCard';
+import { palette } from './Screen';
 
 const DRAG_THRESHOLD = 4;
+
+// Cards fan out in a single overlapping row, like a hand of cards actually held in your
+// palm, instead of wrapping into a flexbox grid. CARD_WIDTH/CARD_HEIGHT match the "hand"
+// PlayingCard size spec — exported so callers (the felt-relative "You" label) can line
+// up against the same geometry without duplicating these numbers.
+export const MAX_FAN_OVERLAP_PX = 34;
+// Never shrink the exposed sliver of a buried card below this — a big hand on a narrow
+// phone is allowed to run slightly past the table's edges rather than pack the fan so
+// tight that a card becomes too thin a target to tap.
+export const MIN_FAN_OVERLAP_PX = 20;
+export const CARD_SCALE = 1.5;
+export const CARD_WIDTH = 74;
+export const CARD_HEIGHT = 112;
+// Beyond this many cards, shrinking the overlap to fit stops being usable (cards become
+// too thin to tap) — switch to a fixed overlap plus horizontal scrolling instead.
+export const HAND_SCROLL_CARD_THRESHOLD = 16;
+// How much of the viewport each arrow press reveals — leaves some overlap with the
+// previous view so the scroll doesn't feel like a jarring page-flip.
+const SCROLL_ARROW_STEP_FRACTION = 0.7;
+// Scaled cards visually bleed past their own unscaled layout box — pad the scrollable
+// content so that bleed on the first/last card doesn't get clipped at the scroll edges.
+const SCROLL_EDGE_PADDING_PX = 24;
+
+// The fan's per-card overlap shrinks (down to MIN_FAN_OVERLAP_PX) as needed to keep a big
+// hand from spilling off a narrow table — a fixed overlap looks great with a handful of
+// cards but runs a full hand of 18 well past the edges of a phone-width table. Exported so
+// the caller (the felt-relative "You" label) can lay out against the exact same row width.
+// `cardScale` is the same responsive multiplier passed to DraggableHand's `cardScale` prop
+// — the overlap has to shrink alongside the cards themselves, or a smaller card on a small
+// screen ends up looking sparsely spaced instead of proportionally fanned.
+// Each card is painted at CARD_WIDTH * CARD_SCALE * cardScale via a centered transform:scale,
+// so it visually bleeds past its own CARD_WIDTH-wide layout box by half the size increase —
+// that bleed eats into whatever sliver of the card underneath was supposed to stay exposed
+// (its corner rank/suit index), so any "desired visible width" must add this back in to get
+// the actual layout overlap needed.
+function overlapPxForVisibleSliver(visibleSliverPx: number, cardScale: number): number {
+  const bleedPx = (CARD_WIDTH * (CARD_SCALE * cardScale - 1)) / 2;
+  return visibleSliverPx + Math.max(0, bleedPx);
+}
+
+export function computeFanOverlapPx(
+  cardCount: number,
+  availableWidthPx: number,
+  cardScale = 1,
+): number {
+  const minOverlapPx = overlapPxForVisibleSliver(MIN_FAN_OVERLAP_PX * cardScale, cardScale);
+  const maxOverlapPx = overlapPxForVisibleSliver(MAX_FAN_OVERLAP_PX * cardScale, cardScale);
+  if (cardCount <= 1 || availableWidthPx <= 0) {
+    return maxOverlapPx;
+  }
+  const cardVisualWidth = CARD_WIDTH * CARD_SCALE * cardScale;
+  const fitOverlap = (availableWidthPx - cardVisualWidth) / (cardCount - 1);
+  return Math.max(minOverlapPx, Math.min(maxOverlapPx, fitOverlap));
+}
 
 const SUIT_ORDER: Record<Card['suit'], number> = {
   spades: 0,
@@ -17,16 +73,22 @@ type DraggableHandProps = {
   readonly cards: readonly Card[];
   readonly canPlay: boolean;
   readonly onPlay: (cardId: string) => void;
-  readonly sortSignal?: number;
   readonly suitSortSignal?: number;
+  // Pixel width the fan is allowed to span before its overlap starts tightening up. Pass
+  // the felt's measured width so a big hand never spills off a narrow table.
+  readonly availableWidthPx: number;
+  // Multiplies CARD_SCALE — shrinks the whole hand on a smaller table instead of holding a
+  // fixed pixel size that dominates a small screen. Defaults to 1 (no change).
+  readonly cardScale?: number;
 };
 
 export function DraggableHand({
   cards,
   canPlay,
   onPlay,
-  sortSignal,
   suitSortSignal,
+  availableWidthPx,
+  cardScale = 1,
 }: DraggableHandProps): React.JSX.Element {
   const [order, setOrder] = useState<string[]>(() => cards.map((card) => card.id));
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -36,8 +98,9 @@ export function DraggableHand({
   orderRef.current = order;
   const cardsRef = useRef(cards);
   cardsRef.current = cards;
-  const isFirstSortSignal = useRef(true);
   const isFirstSuitSortSignal = useRef(true);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [scrollOffsetPx, setScrollOffsetPx] = useState(0);
 
   useEffect(() => {
     setOrder((previous) => {
@@ -48,21 +111,6 @@ export function DraggableHand({
       return [...kept, ...added];
     });
   }, [cards]);
-
-  useEffect(() => {
-    if (isFirstSortSignal.current) {
-      isFirstSortSignal.current = false;
-      return;
-    }
-    const cardsById = new Map(cardsRef.current.map((card) => [card.id, card]));
-    setOrder((previous) =>
-      [...previous].sort((a, b) => {
-        const rankA = cardsById.get(a)?.rank ?? 0;
-        const rankB = cardsById.get(b)?.rank ?? 0;
-        return rankB - rankA;
-      }),
-    );
-  }, [sortSignal]);
 
   useEffect(() => {
     if (isFirstSuitSortSignal.current) {
@@ -88,6 +136,46 @@ export function DraggableHand({
   const orderedCards = order
     .map((id) => cardsById.get(id))
     .filter((card): card is Card => card !== undefined);
+  const effectiveCardScale = CARD_SCALE * cardScale;
+
+  // A hand this big can't shrink its way to fitting without becoming untappable — switch
+  // to a fixed, comfortable overlap plus horizontal scroll navigation instead.
+  const isScrollMode = orderedCards.length > HAND_SCROLL_CARD_THRESHOLD;
+  const overlapPx = isScrollMode
+    ? overlapPxForVisibleSliver(MAX_FAN_OVERLAP_PX * cardScale, cardScale)
+    : computeFanOverlapPx(orderedCards.length, availableWidthPx, cardScale);
+  const rowWidthPx = overlapPx * Math.max(orderedCards.length - 1, 0);
+  const fanContentWidthPx = rowWidthPx + CARD_WIDTH + SCROLL_EDGE_PADDING_PX * 2;
+  const maxScrollOffsetPx = Math.max(0, fanContentWidthPx - availableWidthPx);
+  // A hand just over the scroll threshold can still fit comfortably at the fixed overlap
+  // (e.g. exactly fitting a wide table) — in that case there's nothing to scroll to, so
+  // center the fan instead of leaving it jammed against the left edge.
+  const scrollContentStartPx =
+    maxScrollOffsetPx > 0
+      ? SCROLL_EDGE_PADDING_PX
+      : Math.max(SCROLL_EDGE_PADDING_PX, (availableWidthPx - rowWidthPx - CARD_WIDTH) / 2);
+
+  // If the hand shrinks (a card gets played) or the table gets narrower, snap the
+  // remembered scroll position back into range instead of leaving it stranded past the end.
+  useEffect(() => {
+    if (!isScrollMode) {
+      if (scrollOffsetPx !== 0) {
+        setScrollOffsetPx(0);
+      }
+      return;
+    }
+    if (scrollOffsetPx > maxScrollOffsetPx) {
+      setScrollOffsetPx(maxScrollOffsetPx);
+      scrollViewRef.current?.scrollTo({ animated: false, x: maxScrollOffsetPx });
+    }
+  }, [isScrollMode, maxScrollOffsetPx, scrollOffsetPx]);
+
+  function scrollByDirection(direction: 1 | -1): void {
+    const stepPx = availableWidthPx * SCROLL_ARROW_STEP_FRACTION;
+    const nextOffset = Math.max(0, Math.min(maxScrollOffsetPx, scrollOffsetPx + direction * stepPx));
+    setScrollOffsetPx(nextOffset);
+    scrollViewRef.current?.scrollTo({ animated: true, x: nextOffset });
+  }
 
   function handleDrop(cardId: string, finalDx: number, finalDy: number): void {
     const startLayout = layoutsRef.current[cardId];
@@ -121,29 +209,71 @@ export function DraggableHand({
     });
   }
 
+  const cardItems = orderedCards.map((card, index) => (
+    <DraggableCardItem
+      anchorLeft={isScrollMode ? scrollContentStartPx : '50%'}
+      canPlay={canPlay}
+      card={card}
+      cardScale={effectiveCardScale}
+      dragPosition={dragPosition}
+      isDragging={draggingId === card.id}
+      key={card.id}
+      offsetPx={isScrollMode ? index * overlapPx + CARD_WIDTH / 2 : -rowWidthPx / 2 + index * overlapPx}
+      onDragEnd={(dx, dy) => {
+        handleDrop(card.id, dx, dy);
+        setDraggingId(null);
+      }}
+      onDragStart={() => {
+        dragPosition.setValue({ x: 0, y: 0 });
+        setDraggingId(card.id);
+      }}
+      onLayoutMeasured={(layout) => {
+        layoutsRef.current[card.id] = layout;
+      }}
+      onTap={() => onPlay(card.id)}
+      zIndex={index}
+    />
+  ));
+
+  if (!isScrollMode) {
+    return (
+      <View style={[styles.hand, { height: CARD_HEIGHT * effectiveCardScale }]}>{cardItems}</View>
+    );
+  }
+
   return (
-    <View style={styles.hand}>
-      {orderedCards.map((card) => (
-        <DraggableCardItem
-          canPlay={canPlay}
-          card={card}
-          dragPosition={dragPosition}
-          isDragging={draggingId === card.id}
-          key={card.id}
-          onDragEnd={(dx, dy) => {
-            handleDrop(card.id, dx, dy);
-            setDraggingId(null);
-          }}
-          onDragStart={() => {
-            dragPosition.setValue({ x: 0, y: 0 });
-            setDraggingId(card.id);
-          }}
-          onLayoutMeasured={(layout) => {
-            layoutsRef.current[card.id] = layout;
-          }}
-          onTap={() => onPlay(card.id)}
-        />
-      ))}
+    <View style={[styles.hand, { height: CARD_HEIGHT * effectiveCardScale }]}>
+      <ScrollView
+        contentContainerStyle={{ width: fanContentWidthPx }}
+        horizontal
+        overScrollMode="never"
+        ref={scrollViewRef}
+        scrollEnabled={false}
+        showsHorizontalScrollIndicator={false}
+        style={[styles.scrollHand, { width: availableWidthPx }]}
+      >
+        {cardItems}
+      </ScrollView>
+      {scrollOffsetPx > 0 && (
+        <Pressable
+          accessibilityLabel="Scroll hand left"
+          accessibilityRole="button"
+          onPress={() => scrollByDirection(-1)}
+          style={[styles.scrollArrow, styles.scrollArrowLeft]}
+        >
+          <Ionicons color={palette.ink} name="chevron-back" size={18} />
+        </Pressable>
+      )}
+      {scrollOffsetPx < maxScrollOffsetPx && (
+        <Pressable
+          accessibilityLabel="Scroll hand right"
+          accessibilityRole="button"
+          onPress={() => scrollByDirection(1)}
+          style={[styles.scrollArrow, styles.scrollArrowRight]}
+        >
+          <Ionicons color={palette.ink} name="chevron-forward" size={18} />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -151,8 +281,12 @@ export function DraggableHand({
 type DraggableCardItemProps = {
   readonly card: Card;
   readonly canPlay: boolean;
+  readonly cardScale: number;
   readonly isDragging: boolean;
   readonly dragPosition: Animated.ValueXY;
+  readonly anchorLeft: number | `${number}%`;
+  readonly offsetPx: number;
+  readonly zIndex: number;
   readonly onLayoutMeasured: (layout: LayoutRectangle) => void;
   readonly onDragStart: () => void;
   readonly onDragEnd: (dx: number, dy: number) => void;
@@ -162,8 +296,12 @@ type DraggableCardItemProps = {
 function DraggableCardItem({
   card,
   canPlay,
+  cardScale,
   isDragging,
   dragPosition,
+  anchorLeft,
+  offsetPx,
+  zIndex,
   onLayoutMeasured,
   onDragStart,
   onDragEnd,
@@ -215,33 +353,60 @@ function DraggableCardItem({
 
   return (
     <Animated.View
+      accessibilityLabel={`Play ${card.rank} of ${card.suit}`}
+      accessibilityRole="button"
       onLayout={(event) => onLayoutMeasured(event.nativeEvent.layout)}
       style={[
         styles.handCard,
-        !canPlay && styles.handCardDisabled,
-        isDragging && {
-          transform: dragPosition.getTranslateTransform(),
-          zIndex: 10,
+        {
+          left: anchorLeft,
+          marginLeft: offsetPx - CARD_WIDTH / 2,
+          zIndex: isDragging ? 999 : zIndex,
         },
+        !canPlay && styles.handCardDisabled,
+        isDragging && { transform: dragPosition.getTranslateTransform() },
       ]}
       {...panResponder.panHandlers}
     >
-      <PlayingCard card={card} size="hand" />
+      <PlayingCard card={card} size="hand" style={{ transform: [{ scale: cardScale }] }} />
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   hand: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 12,
+    width: '100%',
+    overflow: 'visible',
   },
   handCard: {
-    marginBottom: 10,
-    marginRight: 8,
+    position: 'absolute',
+    top: 0,
   },
   handCardDisabled: {
     opacity: 0.65,
+  },
+  scrollArrow: {
+    alignItems: 'center',
+    backgroundColor: palette.white,
+    borderColor: '#DED8CC',
+    borderRadius: 16,
+    borderWidth: 1,
+    height: 32,
+    justifyContent: 'center',
+    position: 'absolute',
+    top: '50%',
+    marginTop: -16,
+    width: 32,
+    zIndex: 1000,
+  },
+  scrollArrowLeft: {
+    left: -4,
+  },
+  scrollArrowRight: {
+    right: -4,
+  },
+  scrollHand: {
+    alignSelf: 'center',
+    overflow: 'hidden',
   },
 });

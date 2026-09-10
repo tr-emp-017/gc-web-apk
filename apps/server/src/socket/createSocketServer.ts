@@ -325,14 +325,19 @@ export function createSocketServer(
           cardId: payload.cardId,
           isInaam: result.isInaam,
         });
-        if (result.isInaam && result.leaderId !== undefined) {
+        if (result.isInaam && result.leaderId !== undefined && result.inaamReceiverId !== undefined) {
           io.to(session.code).emit('inaam:given', {
             playerId: session.playerId,
             cardId: payload.cardId,
             leaderId: result.leaderId,
+            receiverId: result.inaamReceiverId,
+            cards: result.inaamCards ?? [],
           });
         } else if (result.chaalWinnerId !== undefined) {
-          io.to(session.code).emit('chaal:completed', { winnerId: result.chaalWinnerId });
+          io.to(session.code).emit('chaal:completed', {
+            winnerId: result.chaalWinnerId,
+            cards: result.completedChaal ?? [],
+          });
         }
         for (const finishedPlayerId of result.finishedPlayerIds) {
           io.to(session.code).emit('player:finished', {
@@ -361,6 +366,80 @@ export function createSocketServer(
           io.to(session.code).emit('game:over', {
             gadhaChorId: result.state.gadhaChorId,
             state: result.state,
+          });
+        }
+      } catch (error) {
+        callback({ ok: false, error: errorMessage(error) });
+      }
+    });
+
+    socket.on('card:requestTransfer', (payload, callback) => {
+      const session = requireSession(socket, callback);
+      if (session === undefined) {
+        return;
+      }
+      try {
+        const { targetSocketId } = roomManager.requestCardTransfer(
+          session.code,
+          session.playerId,
+          payload.targetPlayerId,
+        );
+        callback({ ok: true });
+        if (targetSocketId !== undefined) {
+          const requester = roomManager.getPlayer(session.code, session.playerId);
+          io.to(targetSocketId).emit('card:transferRequested', {
+            requesterId: session.playerId,
+            requesterName: requester.name,
+          });
+        }
+      } catch (error) {
+        callback({ ok: false, error: errorMessage(error) });
+      }
+    });
+
+    socket.on('card:respondTransfer', (payload, callback) => {
+      const session = requireSession(socket, callback);
+      if (session === undefined) {
+        return;
+      }
+      try {
+        const result = roomManager.respondCardTransfer(session.code, session.playerId, payload.accept);
+        callback({ ok: true });
+        io.to(session.code).emit('card:transferResolved', {
+          requesterId: result.requesterId,
+          targetId: session.playerId,
+          accepted: result.accepted,
+        });
+        if (!result.accepted) {
+          return;
+        }
+        for (const finishedPlayerId of result.finishedPlayerIds) {
+          io.to(session.code).emit('player:finished', {
+            playerId: finishedPlayerId,
+            reward: result.rewards[finishedPlayerId] ?? 0,
+          });
+          const finishedSocketId = roomManager.getPlayer(session.code, finishedPlayerId).socketId;
+          if (finishedSocketId !== undefined) {
+            io.to(finishedSocketId).emit('wallet:updated', {
+              balance: roomManager.getWalletBalance(finishedPlayerId),
+            });
+          }
+        }
+        for (const player of roomManager.getRoomSummary(session.code).players) {
+          const playerSocketId = roomManager.getPlayer(session.code, player.id).socketId;
+          if (playerSocketId !== undefined) {
+            io.to(playerSocketId).emit(
+              'game:state',
+              roomManager.getPublicGameState(session.code, player.id),
+            );
+          }
+        }
+        const latestState = roomManager.getPublicGameState(session.code, session.playerId);
+        io.to(session.code).emit('turn:changed', latestState.currentPlayerId);
+        if (latestState.status === 'GAME_OVER' && latestState.gadhaChorId !== undefined) {
+          io.to(session.code).emit('game:over', {
+            gadhaChorId: latestState.gadhaChorId,
+            state: latestState,
           });
         }
       } catch (error) {
