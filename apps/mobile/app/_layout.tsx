@@ -11,9 +11,11 @@ export default function RootLayout(): React.JSX.Element {
     // Ask for the mic up front, on app open, instead of leaving the first prompt to
     // whenever voice chat happens to spin up mid-game. There's no separate Android
     // permission for audio output/speaker — RECORD_AUDIO is the only one voice chat needs.
-    const recordAudioPermission = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
-    if (Platform.OS === 'android' && recordAudioPermission !== undefined) {
-      void PermissionsAndroid.request(recordAudioPermission);
+    if (Platform.OS === 'android') {
+      const recordAudioPermission = PermissionsAndroid.PERMISSIONS.RECORD_AUDIO;
+      if (recordAudioPermission !== undefined) {
+        void PermissionsAndroid.request(recordAudioPermission);
+      }
     }
   }, []);
 
