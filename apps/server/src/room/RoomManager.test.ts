@@ -78,8 +78,8 @@ describe('RoomManager', () => {
 
   it('creates a room and allows players to join', () => {
     const manager = new RoomManager();
-    const host = manager.createRoom(' Aslam ', 'sun', 'socket-host', ENTRY_POINTS);
-    const guest = manager.joinRoom(host.code.toLowerCase(), 'Rahul', 'moon', 'socket-guest');
+    const host = manager.createRoom(' Aslam ', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+    const guest = manager.joinRoom(host.code.toLowerCase(), 'Rahul', 'wink-tongue', 'socket-guest');
     const summary = manager.getRoomSummary(host.code);
 
     expect(host.code).toMatch(/^GC-\d{4}$/);
@@ -92,11 +92,11 @@ describe('RoomManager', () => {
 
   it('requires three ready players and only permits the host to start', () => {
     const manager = new RoomManager();
-    const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-    const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
+    const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+    const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
 
     expect(() => manager.startGame(host.code, host.playerId)).toThrow(/At least 3/);
-    const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+    const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
     manager.setReady(host.code, second.playerId, true);
     manager.setReady(host.code, third.playerId, true);
     expect(() => manager.startGame(host.code, second.playerId)).toThrow(/Only the host/);
@@ -108,9 +108,9 @@ describe('RoomManager', () => {
 
   it('shows each player their own cards but only counts for opponents', () => {
     const manager = new RoomManager();
-    const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-    const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-    const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+    const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+    const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+    const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
 
     for (const player of [host, second, third]) {
       manager.setReady(host.code, player.playerId, true);
@@ -135,7 +135,7 @@ describe('RoomManager', () => {
   it('restores a disconnected player within the reconnect window', () => {
     vi.useFakeTimers();
     const manager = new RoomManager();
-    const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
+    const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
     let expired = false;
 
     manager.disconnect(host.code, host.playerId, () => {
@@ -152,16 +152,16 @@ describe('RoomManager', () => {
 
   it('returns no game state on reconnect when the game has not started yet', () => {
     const manager = new RoomManager();
-    const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
+    const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
 
     expect(manager.getPublicGameStateIfStarted(host.code, host.playerId)).toBeUndefined();
   });
 
   it('returns the game state on reconnect once the game has started', () => {
     const manager = new RoomManager();
-    const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-    const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-    const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+    const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+    const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+    const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
     manager.setReady(host.code, second.playerId, true);
     manager.setReady(host.code, third.playerId, true);
     manager.startGame(host.code, host.playerId);
@@ -173,7 +173,7 @@ describe('RoomManager', () => {
   it('expires disconnected players after the reconnect window', () => {
     vi.useFakeTimers();
     const manager = new RoomManager(1000);
-    const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
+    const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
     let expired = false;
 
     manager.disconnect(host.code, host.playerId, () => {
@@ -188,32 +188,32 @@ describe('RoomManager', () => {
   describe('entry points and wallet', () => {
     it('rejects a non-positive entry points value', () => {
       const manager = new RoomManager();
-      expect(() => manager.createRoom('Aslam', 'sun', 'socket-host', 0)).toThrow(/positive number/);
-      expect(() => manager.createRoom('Aslam', 'sun', 'socket-host', -5)).toThrow(
+      expect(() => manager.createRoom('Aslam', 'beard-glasses', 'socket-host', 0)).toThrow(/positive number/);
+      expect(() => manager.createRoom('Aslam', 'beard-glasses', 'socket-host', -5)).toThrow(
         /positive number/,
       );
     });
 
     it('rejects room creation when the host cannot afford the entry points', () => {
       const manager = new RoomManager(60_000, new InMemoryWalletLedger(50));
-      expect(() => manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS)).toThrow(
+      expect(() => manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS)).toThrow(
         /Insufficient balance/,
       );
     });
 
     it('rejects joining a room the player cannot afford', () => {
       const manager = new RoomManager(60_000, new TieredWalletLedger());
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      expect(() => manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-guest')).toThrow(
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      expect(() => manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-guest')).toThrow(
         /Insufficient balance/,
       );
     });
 
     it('deducts entry points from every player atomically when the game starts', () => {
       const manager = new RoomManager();
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
       manager.setReady(host.code, second.playerId, true);
       manager.setReady(host.code, third.playerId, true);
 
@@ -231,9 +231,9 @@ describe('RoomManager', () => {
 
     it('credits each winner an equal share of the pool the instant they finish, never the Gadha Chor', () => {
       const manager = new RoomManager();
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
       manager.setReady(host.code, second.playerId, true);
       manager.setReady(host.code, third.playerId, true);
       const startingBalance = manager.getWalletBalance(host.playerId);
@@ -260,9 +260,9 @@ describe('RoomManager', () => {
   describe('leaving and spectating after finishing', () => {
     it('rejects leaving or spectating before the player has finished', () => {
       const manager = new RoomManager();
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
       manager.setReady(host.code, second.playerId, true);
       manager.setReady(host.code, third.playerId, true);
       manager.startGame(host.code, host.playerId);
@@ -273,9 +273,9 @@ describe('RoomManager', () => {
 
     it('lets a finished player choose to leave or spectate, reflected in the room summary', () => {
       const manager = new RoomManager();
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
       manager.setReady(host.code, second.playerId, true);
       manager.setReady(host.code, third.playerId, true);
       manager.startGame(host.code, host.playerId);
@@ -292,12 +292,64 @@ describe('RoomManager', () => {
     });
   });
 
+  describe('playing again after a match ends', () => {
+    it('rejects playing again before the current match has finished', () => {
+      const manager = new RoomManager();
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
+      manager.setReady(host.code, second.playerId, true);
+      manager.setReady(host.code, third.playerId, true);
+
+      expect(() => manager.playAgain(host.code, host.playerId)).toThrow(/has not finished/);
+
+      manager.startGame(host.code, host.playerId);
+      expect(() => manager.playAgain(host.code, host.playerId)).toThrow(/has not finished/);
+    });
+
+    it('resets the room to a lobby-ready state, and a full new game can be started', () => {
+      const manager = new RoomManager();
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
+      manager.setReady(host.code, second.playerId, true);
+      manager.setReady(host.code, third.playerId, true);
+      manager.startGame(host.code, host.playerId);
+      playGameToCompletion(manager, host.code, host.playerId);
+
+      // Any player in the room (not just the host) can trigger the reset.
+      manager.playAgain(host.code, second.playerId);
+
+      const summary = manager.getRoomSummary(host.code);
+      expect(summary.status).toBe('LOBBY');
+      expect(summary.pool).toBeUndefined();
+      for (const player of summary.players) {
+        expect(player.status).toBe('ACTIVE');
+        expect(player.ready).toBe(player.isHost);
+      }
+
+      // Non-host players must ready up again before the host can start a new match.
+      expect(() => manager.startGame(host.code, host.playerId)).toThrow(/must be ready/);
+      manager.setReady(host.code, second.playerId, true);
+      manager.setReady(host.code, third.playerId, true);
+
+      const startingBalance = manager.getWalletBalance(second.playerId);
+      manager.startGame(host.code, host.playerId);
+      expect(manager.getRoomSummary(host.code).status).toBe('PLAYING');
+      // Entry points are deducted again for the new match, same as the first time.
+      expect(manager.getWalletBalance(second.playerId)).toBe(startingBalance - ENTRY_POINTS);
+
+      const { finalState } = playGameToCompletion(manager, host.code, host.playerId);
+      expect(finalState.status).toBe('GAME_OVER');
+    });
+  });
+
   describe('kicking players from the lobby', () => {
     it('lets only the host remove a player before the game starts', () => {
       const manager = new RoomManager();
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
 
       expect(() => manager.kickPlayer(host.code, second.playerId, third.playerId)).toThrow(
         /Only the host/,
@@ -313,9 +365,9 @@ describe('RoomManager', () => {
 
     it('rejects the host removing themself or removing anyone after the game starts', () => {
       const manager = new RoomManager();
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
 
       expect(() => manager.kickPlayer(host.code, host.playerId, host.playerId)).toThrow(
         /cannot remove themself/,
@@ -334,9 +386,9 @@ describe('RoomManager', () => {
   describe('exiting mid-game', () => {
     it('immediately ends the game and marks the exiting player as Gadha Chor and LEFT', () => {
       const manager = new RoomManager();
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
       manager.setReady(host.code, second.playerId, true);
       manager.setReady(host.code, third.playerId, true);
       manager.startGame(host.code, host.playerId);
@@ -352,11 +404,11 @@ describe('RoomManager', () => {
 
     it('does nothing when the game has not started or is already over', () => {
       const manager = new RoomManager();
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
       expect(manager.endGameForExit(host.code, host.playerId)).toBeUndefined();
 
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
       manager.setReady(host.code, second.playerId, true);
       manager.setReady(host.code, third.playerId, true);
       manager.startGame(host.code, host.playerId);
@@ -399,9 +451,9 @@ describe('RoomManager', () => {
       third: { code: string; playerId: string };
       leadingState: PublicGameState;
     } {
-      const host = manager.createRoom('Aslam', 'sun', 'socket-host', ENTRY_POINTS);
-      const second = manager.joinRoom(host.code, 'Rahul', 'moon', 'socket-second');
-      const third = manager.joinRoom(host.code, 'Ali', 'star', 'socket-third');
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
       manager.setReady(host.code, second.playerId, true);
       manager.setReady(host.code, third.playerId, true);
       manager.startGame(host.code, host.playerId);

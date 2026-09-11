@@ -1,11 +1,12 @@
 import { Screen, palette } from '../../src/components/Screen';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { useEffect, useState } from 'react';
 import { useRoomStore } from '../../src/stores/roomStore';
-import { AVATAR_SYMBOLS, type PublicPlayer } from '@gadha-chor/shared-types';
+import { AVATAR_IMAGES } from '../../src/constants/avatarImages';
+import type { PublicPlayer } from '@gadha-chor/shared-types';
 
 export default function RoomLobbyScreen(): React.JSX.Element {
   const router = useRouter();
@@ -59,7 +60,7 @@ export default function RoomLobbyScreen(): React.JSX.Element {
             <View
               style={[styles.avatar, player.connected ? styles.connected : styles.disconnected]}
             >
-              <Text style={styles.avatarText}>{AVATAR_SYMBOLS[player.avatar]}</Text>
+              <Image resizeMode="cover" source={AVATAR_IMAGES[player.avatar]} style={styles.avatarImage} />
             </View>
             <View style={styles.playerInfo}>
               <Text style={styles.playerName}>{player.name}</Text>
@@ -138,14 +139,15 @@ const styles = StyleSheet.create({
   avatar: {
     alignItems: 'center',
     borderRadius: 20,
+    borderWidth: 2,
     height: 40,
     justifyContent: 'center',
+    overflow: 'hidden',
     width: 40,
   },
-  avatarText: {
-    color: palette.white,
-    fontSize: 16,
-    fontWeight: '800',
+  avatarImage: {
+    height: '100%',
+    width: '100%',
   },
   code: {
     color: palette.red,
@@ -154,7 +156,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   connected: {
-    backgroundColor: palette.red,
+    borderColor: palette.red,
   },
   description: {
     color: palette.muted,
@@ -163,7 +165,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   disconnected: {
-    backgroundColor: palette.muted,
+    borderColor: palette.muted,
   },
   error: {
     color: palette.red,

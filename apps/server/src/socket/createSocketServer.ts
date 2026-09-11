@@ -207,6 +207,23 @@ export function createSocketServer(
       }
     });
 
+    socket.on('room:playAgain', (callback) => {
+      const session = requireSession(socket, callback);
+      if (session === undefined) {
+        return;
+      }
+      try {
+        roomManager.playAgain(session.code, session.playerId);
+        callback({ ok: true });
+        // No emitGameState here — there's no game any more (room.game is now undefined), and
+        // getPublicGameState throws in that case. room:updated alone (status now 'LOBBY') is
+        // what tells every client to drop back to the lobby and clear their stale gameState.
+        emitRoomUpdated(session.code);
+      } catch (error) {
+        callback({ ok: false, error: errorMessage(error) });
+      }
+    });
+
     socket.on('voice:join', (callback) => {
       const session = requireSession(socket, callback);
       if (session === undefined) {
@@ -467,6 +484,18 @@ export function createSocketServer(
       } catch (error) {
         callback({ ok: false, error: errorMessage(error) });
       }
+    });
+
+    socket.on('sound:play', (payload, callback) => {
+      const session = requireSession(socket, callback);
+      if (session === undefined) {
+        return;
+      }
+      io.to(session.code).emit('sound:played', {
+        playerId: session.playerId,
+        soundId: payload.soundId,
+      });
+      callback({ ok: true });
     });
 
     socket.on('disconnect', () => {

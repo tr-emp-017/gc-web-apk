@@ -25,6 +25,11 @@
       "expo-screen-orientation",
       "expo-status-bar"
     ],
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./public/favicon.png"
+    },
     "extra": {
       "router": {
         "origin": false

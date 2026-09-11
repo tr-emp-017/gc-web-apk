@@ -19,6 +19,7 @@
     "@gadha-chor/game-engine": "workspace:*",
     "@gadha-chor/shared-types": "workspace:*",
     "@gadha-chor/shared-utils": "workspace:*",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "^57.0.21",
     "expo-asset": "~57.0.16",
     "expo-audio": "~57.0.4",

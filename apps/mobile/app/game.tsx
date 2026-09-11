@@ -4,10 +4,12 @@ import {
   Animated,
   Dimensions,
   Easing,
+  Image,
   ImageBackground,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   Vibration,
@@ -32,12 +34,25 @@ import {
   computeFanOverlapPx,
 } from '../src/components/DraggableHand';
 import { ThrownCard } from '../src/components/ThrownCard';
+import { ReactionFlyer } from '../src/components/ReactionFlyer';
+import { ProfileModal } from '../src/components/ProfileModal';
+import { AvatarFlash } from '../src/components/AvatarFlash';
+import { FunSoundPlayback } from '../src/components/FunSoundPlayback';
 import { useSound } from '../src/hooks/useSound';
+import { AVATAR_IMAGES } from '../src/constants/avatarImages';
+import { CRYING_DONKEY_IMAGE } from '../src/constants/gameOverImages';
+import { CRYING_FACE_IMAGES } from '../src/constants/cryingFaceImages';
+import {
+  attachFullscreenUnlockGesture,
+  exitWebFullscreenLandscape,
+  requestWebFullscreenLandscape,
+} from '../src/utils/webFullscreen';
 
 import {
-  AVATAR_SYMBOLS,
-  REACTION_OPTIONS,
+  FUN_SOUND_OPTIONS,
+  FUN_SOUND_SYMBOLS,
   REACTION_SYMBOLS,
+  type FunSoundId,
   type PublicPlayer,
   type ReactionId,
   type VisibleCard,
@@ -101,20 +116,39 @@ const ME_SEAT: SeatPosition = { x: 50, y: 92 };
 // aspect ratios without fully eliminating it on any single device.
 const TABLE_ASPECT_RATIO = 16 / 9;
 const NATIVE_TABLE_ASPECT_RATIO = 2.4;
+// Native only: a modest deliberate vertical-only stretch applied on top of the normal
+// contain-fit box below, so the table reads as a little taller/more vertically spacious
+// without widening it or touching the table image asset itself. Paired with resizeMode
+// "stretch" (native only, see TableWrap) so the image actually fills the taller box instead
+// of just adding empty padding above/below it. Clamped where it's applied so it can never
+// push the table's top edge above the visible screen.
+const NATIVE_TABLE_VERTICAL_STRETCH = 1.12;
 // A bit more breathing room between hand cards on native than web's default fan spacing.
 const HAND_OVERLAP_MULTIPLIER_NATIVE = 1.2;
 // Small deliberate gap between the hand's bottom edge and the true screen edge on native —
 // enough to avoid looking pasted flush against the bezel, not enough to reintroduce the
 // large dead margin this was fixed to remove.
-const HAND_BOTTOM_MARGIN_NATIVE_PX = 10;
+const HAND_BOTTOM_MARGIN_NATIVE_PX = 15;
 // Table/thrown/discard-pile cards are rendered at "played" size and visually scaled up —
 // scaling is centered on each card's own box, so none of the position/centering math below
 // needs to change to account for it.
 const TABLE_CARD_SCALE = 1.4;
-// How far the "You" name/avatar label sits to the left of your hand, and how wide that
-// label's own box is (matches styles.seat, reused for every seat including this one).
-const MY_LABEL_GAP_PX = 24;
-const MY_LABEL_WIDTH_PX = 96;
+// How far the "You" name/avatar label sits to the left of your hand.
+const MY_LABEL_GAP_PX = 20;
+// Base (responsiveScale === 1) profile sizing — large, clearly-visible circular avatars with
+// consistent spacing to the name/turn indicator below them, matching every seat including the
+// "You" label. Scaled by responsiveScale below so it shrinks proportionally on a smaller table
+// instead of dominating it.
+const AVATAR_SIZE_PX = 85;
+const SEAT_LABEL_WIDTH_PX = 132;
+// Android landscape only: profiles read noticeably larger there than the web baseline above.
+const NATIVE_AVATAR_SIZE_MULTIPLIER = 1.4;
+// Android landscape only: the topmost seat row (e.g. the 5-opponent layout's dead-center-top
+// seat at y: 2) sits close enough to the table's own top edge that the now-larger avatar
+// visually overlaps it. Clamping every opponent seat's y to at least this percent nudges only
+// the seats that are already near the top down a little, leaving every other seat (and every
+// x position) exactly where it was.
+const NATIVE_MIN_OPPONENT_SEAT_Y_PERCENT = 14;
 // The hand's fan is allowed to use this fraction of the felt's width before its overlap
 // starts tightening up — leaves a little breathing room on either side.
 const HAND_WIDTH_BUDGET_FRACTION = 0.92;
@@ -127,7 +161,7 @@ const MIN_RESPONSIVE_SCALE = 0.5;
 
 // Played cards lay out as a flat horizontal row across the middle of the felt, in play
 // order, instead of scattering toward each player's seat — easier to read at a glance.
-const TABLE_CARD_ROW_GAP_PX = 82;
+const TABLE_CARD_ROW_GAP_PX = 95;
 const TABLE_CARD_ROW_Y_PERCENT = 46;
 // Where finished tricks collect, face-down, like a real discard pile — always the same
 // spot (bottom-right edge of the felt), regardless of who won the trick.
@@ -167,10 +201,10 @@ function rowPosition(index: number, total: number, tableWidthPx: number, gapPx: 
 
 // Web uses the wood-framed photo, "cover"-cropped since a browser tab is always at least
 // as wide as the table's own 16:9 art. Native uses a transparent-background render of the
-// same table (poker-table-native.png, itself already 16:9) with "contain" instead — Android
-// phones span a much wider range of aspect ratios, and "cover" would crop the oval's rounded
-// ends unpredictably on ones that don't match; "contain" always shows the whole table, with
-// the surrounding `style.table` backgroundColor (already wood-toned) filling any letterbox.
+// same table (poker-table-native.png) with "stretch" instead — the box below is sized to
+// exactly match the image's own aspect ratio horizontally, then deliberately inflated a
+// little vertically (NATIVE_TABLE_VERTICAL_STRETCH), so "stretch" only ever distorts that
+// same small vertical amount rather than cropping or padding the table.
 function TableWrap({
   children,
   onLayout,
@@ -186,7 +220,11 @@ function TableWrap({
     <ImageBackground
       imageStyle={tableImageStyle}
       onLayout={onLayout}
-      resizeMode={Platform.OS === 'web' ? 'cover' : 'contain'}
+      // "stretch" (native) is what actually makes the deliberate vertical stretch above
+      // (renderedBoxHeight in game.tsx) visible — "contain" would just add empty padding
+      // above/below the image inside the taller box instead of enlarging it. Since the box's
+      // width is untouched and only its height is inflated, this only stretches vertically.
+      resizeMode={Platform.OS === 'web' ? 'cover' : 'stretch'}
       source={
         Platform.OS === 'web'
           ? // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
@@ -230,12 +268,14 @@ export default function GameTableScreen(): React.JSX.Element {
   const room = useRoomStore((state) => state.room);
   const gameState = useRoomStore((state) => state.gameState);
   const playerId = useRoomStore((state) => state.playerId);
+  const previewMode = useRoomStore((state) => state.previewMode);
   const playCard = useRoomStore((state) => state.playCard);
   const reactToPlayer = useRoomStore((state) => state.reactToPlayer);
   const latestReaction = useRoomStore((state) => state.latestReaction);
   const walletBalance = useRoomStore((state) => state.walletBalance);
   const leaveGame = useRoomStore((state) => state.leaveGame);
   const spectateGame = useRoomStore((state) => state.spectateGame);
+  const playAgain = useRoomStore((state) => state.playAgain);
   const exitGame = useRoomStore((state) => state.exitGame);
   const returnHome = useRoomStore((state) => state.returnHome);
   const error = useRoomStore((state) => state.error);
@@ -248,6 +288,8 @@ export default function GameTableScreen(): React.JSX.Element {
   const respondCardTransfer = useRoomStore((state) => state.respondCardTransfer);
   const lastInaam = useRoomStore((state) => state.lastInaam);
   const clearLastInaam = useRoomStore((state) => state.clearLastInaam);
+  const lastFunSound = useRoomStore((state) => state.lastFunSound);
+  const playFunSound = useRoomStore((state) => state.playFunSound);
   const { isMuted, isSpeakerEnabled, toggleMuted, toggleSpeaker, unavailable } = useVoice();
   const liveWindowSize = useLiveWindowSize();
   // The root viewport below measures its OWN actual laid-out size via onLayout — that's the
@@ -265,16 +307,46 @@ export default function GameTableScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
+  const [isStartingRematch, setIsStartingRematch] = useState(false);
   const [suitSortSignal, setSuitSortSignal] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingTransferTargetId, setPendingTransferTargetId] = useState<string | null>(null);
+  // Reactions thrown from the profile modal: every connected client (sender, target, and
+  // bystanders alike) gets the same 'player:reacted' broadcast and renders the same flight,
+  // so everyone sees the same throw land in the same place.
+  const [reactionFlights, setReactionFlights] = useState<
+    readonly {
+      readonly id: string;
+      readonly reaction: ReactionId;
+      readonly fromPlayerId: string;
+      readonly targetPlayerId: string;
+    }[]
+  >([]);
+  // latestReaction is a fresh object reference every time the store receives one, even for an
+  // identical reaction sent twice in a row — comparing by reference (not by field equality)
+  // against the last one this effect has already turned into a flight is what lets repeated
+  // identical reactions each still trigger their own throw.
+  const handledReactionRef = useRef<typeof latestReaction>(null);
+  // The bottom-left soundboard: any player can play one of these for the whole room, and the
+  // player's own profile flashes wherever their seat is (opponent seat or the "You" label) for
+  // as long as the sound plays. Same broadcast-to-everyone, dedupe-by-reference pattern as
+  // reactions above.
+  const [soundboardOpen, setSoundboardOpen] = useState(false);
+  const [funSoundFlashes, setFunSoundFlashes] = useState<
+    readonly { readonly id: string; readonly playerId: string; readonly soundId: FunSoundId }[]
+  >([]);
+  const handledFunSoundRef = useRef<typeof lastFunSound>(null);
+  const funSoundFlashPlayerIds = new Set(funSoundFlashes.map((flash) => flash.playerId));
+  // Only one soundboard clip plays for the whole room at a time — every sound button is
+  // disabled (for every player) while any of them is still playing, then all re-enable
+  // together the instant it finishes.
+  const isAnySoundPlaying = funSoundFlashes.length > 0;
 
   // Force landscape the moment this screen mounts (entering the game), and hand
   // orientation control back the moment it unmounts (leaving the game) — the lobby/home
   // screens, and the app as a whole, are never touched. Native-only: app.json's top-level
   // "orientation" is "default" (unrestricted) specifically so this per-screen lock can take
-  // effect on iOS, which otherwise enforces the manifest-level setting as a hard cap. Web
-  // keeps its existing desktop layout untouched, since orientation locking is a native concept.
+  // effect on iOS, which otherwise enforces the manifest-level setting as a hard cap.
   useEffect(() => {
     if (Platform.OS === 'web') {
       return;
@@ -287,7 +359,26 @@ export default function GameTableScreen(): React.JSX.Element {
       void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
     };
   }, []);
-  const showCardCounts = room?.showCardCounts ?? false;
+  // Web equivalent of the native lock above: requests fullscreen (what actually hides
+  // Chrome's address bar) and, once granted, locks to landscape. Browsers only grant
+  // requestFullscreen() from a genuine user gesture, so this both tries eagerly on mount
+  // (works if navigating here was itself a tap) and falls back to the very first tap
+  // anywhere on the game screen if that eager attempt was blocked — no separate "rotate your
+  // device" prompt is ever shown, this is purely best-effort browser API use. Desktop web
+  // (mouse-driven, not a phone) is unaffected either way: fullscreen there just means the
+  // existing layout fills the whole window, and orientation lock is a no-op without a
+  // rotatable screen.
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+    requestWebFullscreenLandscape();
+    const detachGesture = attachFullscreenUnlockGesture();
+    return () => {
+      detachGesture();
+      exitWebFullscreenLandscape();
+    };
+  }, []);
   // Null-safe stand-in for isMyTurn (computed properly below, once gameState is narrowed
   // non-null) — needed here because hooks must run unconditionally, before either early
   // return below.
@@ -303,7 +394,11 @@ export default function GameTableScreen(): React.JSX.Element {
     const index = opponents.findIndex((opponent) => opponent.id === player.id);
     const layout = OPPONENT_SEAT_LAYOUTS[opponents.length] ?? OPPONENT_SEAT_LAYOUTS[5];
     const seatIndex = layout !== undefined ? layout.length - 1 - index : index;
-    return layout?.[seatIndex] ?? { x: 50, y: 10 };
+    const position = layout?.[seatIndex] ?? { x: 50, y: 10 };
+    if (Platform.OS === 'web') {
+      return position;
+    }
+    return { x: position.x, y: Math.max(position.y, NATIVE_MIN_OPPONENT_SEAT_Y_PERCENT) };
   };
 
   // The table fills the safe area — letterboxed to TABLE_ASPECT_RATIO and centered within
@@ -319,6 +414,14 @@ export default function GameTableScreen(): React.JSX.Element {
     boxHeight = availableHeight;
     boxWidth = boxHeight * tableAspectRatio;
   }
+  // boxWidth stays exactly as computed above (no sideways stretch). boxHeight gets a modest
+  // vertical-only bump on native, capped so the table's top edge can never rise above the
+  // physical screen (insets.top + availableHeight is the same quantity tableTopPx's
+  // bottom-anchor below is measured from).
+  const renderedBoxHeight =
+    Platform.OS === 'web'
+      ? boxHeight
+      : Math.min(boxHeight * NATIVE_TABLE_VERTICAL_STRETCH, insets.top + availableHeight);
   // Card sizing scales down proportionally on a smaller table instead of holding a fixed
   // pixel size that dominates a small screen.
   const responsiveScale = Math.max(
@@ -327,6 +430,21 @@ export default function GameTableScreen(): React.JSX.Element {
   );
   const tableCardRowGapPx = TABLE_CARD_ROW_GAP_PX * responsiveScale;
   const tableCardTransformStyle = { transform: [{ scale: TABLE_CARD_SCALE * responsiveScale }] };
+  // Large, clearly-visible circular avatars — sized relative to the table (like every other
+  // seat/card measurement here) so they scale together with it instead of dominating a small
+  // table or looking tiny on a large one. Android landscape gets a further deliberate bump on
+  // top of the shared web baseline; the seat label and its text scale the same way so the
+  // username and TURN indicator stay aligned with the bigger avatar.
+  const nativeAvatarMultiplier = Platform.OS === 'web' ? 1 : NATIVE_AVATAR_SIZE_MULTIPLIER;
+  const avatarSizePx = AVATAR_SIZE_PX * responsiveScale * nativeAvatarMultiplier;
+  const seatLabelWidthPx = SEAT_LABEL_WIDTH_PX * responsiveScale * nativeAvatarMultiplier;
+  const avatarSizeStyle = { borderRadius: avatarSizePx / 2, height: avatarSizePx, width: avatarSizePx };
+  const seatSizeStyle = {
+    marginLeft: -seatLabelWidthPx / 2,
+    marginTop: -avatarSizePx / 2,
+    width: seatLabelWidthPx,
+  };
+  const playerNameSizeStyle = { fontSize: 18 * responsiveScale, maxWidth: seatLabelWidthPx };
 
   // Measured once the felt is actually laid out, so seat/throw positions (given in
   // percent) can be converted to real pixel deltas for the throw animation below.
@@ -447,6 +565,52 @@ export default function GameTableScreen(): React.JSX.Element {
     playCollectSound,
     transferSweepAnim,
   ]);
+
+  // Turns the store's latestReaction (also used for the small top-right toast) into a flying
+  // reaction: everyone in the room gets the same broadcast, so this fires identically on the
+  // sender's, the target's, and every bystander's screen.
+  useEffect(() => {
+    if (latestReaction === null || handledReactionRef.current === latestReaction) {
+      return;
+    }
+    handledReactionRef.current = latestReaction;
+    if (tableSize.width === 0) {
+      return;
+    }
+    setReactionFlights((current) => [
+      ...current,
+      {
+        fromPlayerId: latestReaction.fromPlayerId,
+        id: `${latestReaction.fromPlayerId}-${latestReaction.targetPlayerId}-${current.length}-${Date.now()}`,
+        reaction: latestReaction.reaction,
+        targetPlayerId: latestReaction.targetPlayerId,
+      },
+    ]);
+  }, [latestReaction, tableSize.width]);
+
+  function removeReactionFlight(id: string): void {
+    setReactionFlights((current) => current.filter((flight) => flight.id !== id));
+  }
+
+  // Same dedupe-by-reference idea as latestReaction above, for the soundboard.
+  useEffect(() => {
+    if (lastFunSound === null || handledFunSoundRef.current === lastFunSound) {
+      return;
+    }
+    handledFunSoundRef.current = lastFunSound;
+    setFunSoundFlashes((current) => [
+      ...current,
+      {
+        id: `${lastFunSound.playerId}-${current.length}-${Date.now()}`,
+        playerId: lastFunSound.playerId,
+        soundId: lastFunSound.soundId,
+      },
+    ]);
+  }, [lastFunSound]);
+
+  function removeFunSoundFlash(id: string): void {
+    setFunSoundFlashes((current) => current.filter((flash) => flash.id !== id));
+  }
 
   // Play the alert sound and vibrate the device the moment it becomes your turn — not on
   // every render while it stays your turn, just the instant it changes.
@@ -637,6 +801,16 @@ export default function GameTableScreen(): React.JSX.Element {
     }
   }
 
+  // Once anyone in the room presses "Play again", the server resets everyone's room back to
+  // 'LOBBY' and roomStore drops the now-stale (finished) gameState to null in response — this
+  // is what sends every player still sitting on this screen (not just whoever pressed the
+  // button) back to the lobby to ready up for the next match.
+  useEffect(() => {
+    if (!previewMode && gameState === null && room !== null && room.status === 'LOBBY') {
+      router.replace(`/room/${room.code}`);
+    }
+  }, [gameState, room, previewMode, router]);
+
   if (gameState === null) {
     return (
       <Screen>
@@ -648,27 +822,98 @@ export default function GameTableScreen(): React.JSX.Element {
 
   if (gameState.status === 'GAME_OVER') {
     const gadhaChor = gameState.players.find((player) => player.id === gameState.gadhaChorId);
+    // Exactly one player ends the game as the Gadha Chor — every other player, by definition,
+    // finished (emptied their hand) before that happened, so they're the winners.
+    const winners = gameState.players.filter((player) => player.id !== gameState.gadhaChorId);
+    const goHome = (): void => {
+      returnHome();
+      router.replace('/');
+    };
     return (
-      <Screen>
-        <Text style={styles.eyebrow}>GAME OVER</Text>
-        <Text style={styles.title}>
-          {gadhaChor?.id === playerId
-            ? 'You are the Gadha Chor'
-            : `${gadhaChor?.name ?? 'A player'} is the Gadha Chor`}
-        </Text>
-        {walletBalance !== null && (
-          <Text style={styles.muted}>Your balance: {walletBalance} coins</Text>
-        )}
-        <View style={styles.actions}>
-          <PrimaryButton
-            label="Back to home"
-            onPress={() => {
-              returnHome();
-              router.replace('/');
-            }}
-          />
-        </View>
-      </Screen>
+      <View style={styles.gameOverBackdrop}>
+        <ScrollView contentContainerStyle={styles.gameOverScrollContent}>
+          <View style={styles.gameOverCard}>
+            <Pressable
+              accessibilityLabel="Back to home"
+              accessibilityRole="button"
+              onPress={goHome}
+              style={styles.gameOverCloseButton}
+            >
+              <Ionicons color={palette.white} name="close" size={20} />
+            </Pressable>
+
+            <Text style={styles.eyebrow}>GAME OVER</Text>
+            <Text style={styles.title}>
+              {gadhaChor?.id === playerId
+                ? 'You are the Gadha Chor'
+                : `${gadhaChor?.name ?? 'A player'} is the Gadha Chor`}
+            </Text>
+
+            <View style={styles.resultColumns}>
+              <View style={styles.resultColumn}>
+                <Text style={styles.resultColumnHeading}>WINNERS</Text>
+                {winners.map((player) => (
+                  <View key={player.id} style={styles.resultPlayerRow}>
+                    <View style={styles.resultAvatar}>
+                      <Image
+                        resizeMode="cover"
+                        source={AVATAR_IMAGES[player.avatar]}
+                        style={styles.resultAvatarImage}
+                      />
+                    </View>
+                    <Text numberOfLines={1} style={styles.resultPlayerName}>
+                      {player.id === playerId ? 'You' : player.name}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={[styles.resultColumn, styles.loserColumn]}>
+                <Text style={styles.resultColumnHeading}>LOSER</Text>
+                {gadhaChor !== undefined && (
+                  <View style={styles.resultPlayerRow}>
+                    <View style={[styles.resultAvatar, styles.loserAvatar]}>
+                      {/* The loser's own crying-face variant, not their normal happy avatar. */}
+                      <Image
+                        resizeMode="cover"
+                        source={CRYING_FACE_IMAGES[gadhaChor.avatar]}
+                        style={styles.resultAvatarImage}
+                      />
+                    </View>
+                    <Text numberOfLines={1} style={styles.resultPlayerName}>
+                      {gadhaChor.id === playerId ? 'You' : gadhaChor.name}
+                    </Text>
+                  </View>
+                )}
+                <Image
+                  resizeMode="contain"
+                  source={CRYING_DONKEY_IMAGE}
+                  style={styles.cryingDonkeyImage}
+                />
+              </View>
+            </View>
+
+            {walletBalance !== null && (
+              <Text style={styles.muted}>Your balance: {walletBalance} coins</Text>
+            )}
+            <View style={styles.actions}>
+              <PrimaryButton
+                label={isStartingRematch ? 'Starting…' : 'Play again'}
+                onPress={() => {
+                  setIsStartingRematch(true);
+                  // No explicit navigation here — the effect above sends every player (not
+                  // just whoever pressed this) back to the lobby once the server confirms the
+                  // reset, via room:updated clearing gameState. In preview mode, playAgain()
+                  // instead regenerates a fresh mock match in place, so there's nothing to
+                  // navigate to.
+                  void playAgain().then(() => setIsStartingRematch(false));
+                }}
+              />
+              <PrimaryButton label="Back to home" onPress={goHome} variant="secondary" />
+            </View>
+          </View>
+        </ScrollView>
+      </View>
     );
   }
 
@@ -686,6 +931,13 @@ export default function GameTableScreen(): React.JSX.Element {
     gameState.currentChaal.length === 0 &&
     activePlayerCount >= 3 &&
     pendingTransferTargetId === null;
+  // The profile modal only ever opens for an opponent's seat (see the Pressable in
+  // opponents.map below), never for the local player.
+  const profileModalPlayer = gameState.players.find((player) => player.id === reactionTargetId) ?? null;
+  const canRequestFromProfileModalPlayer =
+    profileModalPlayer !== null &&
+    canRequestCardTransfer &&
+    profileModalPlayer.status === 'ACTIVE';
   // Cards an Inaam is currently carrying to you must stay out of your hand's display (and
   // its width math) until the sweep animation actually lands them, even though the server
   // state has already added them. Same idea for a "take all cards" transfer: the giver keeps
@@ -726,23 +978,28 @@ export default function GameTableScreen(): React.JSX.Element {
   // tightened fan overlap — clamp so it stays on screen (overlapping the hand slightly in
   // that extreme case) rather than disappearing off the side entirely.
   const minLabelOffsetPx =
-    tableSize.width > 0 ? -(tableSize.width / 2) + MY_LABEL_WIDTH_PX / 2 + 6 : Number.NEGATIVE_INFINITY;
+    tableSize.width > 0 ? -(tableSize.width / 2) + seatLabelWidthPx / 2 + 6 : Number.NEGATIVE_INFINITY;
   const myLabelOffsetPx = Math.max(
-    -(handRowWidthPx / 2) - handVisualHalfWidthPx - MY_LABEL_GAP_PX - MY_LABEL_WIDTH_PX,
+    -(handRowWidthPx / 2) - handVisualHalfWidthPx - MY_LABEL_GAP_PX - seatLabelWidthPx,
     minLabelOffsetPx,
   );
-  const tableTopPx = insets.top + (availableHeight - boxHeight) / 2;
-  // On native, the table box (letterboxed to NATIVE_TABLE_ASPECT_RATIO within the safe
-  // area) usually doesn't reach the true bottom of the screen. The hand is anchored inside
-  // the table's own coordinate space (so its width/centering still track the table), but is
-  // pushed down past the table's own bottom edge by this gap (minus a small deliberate
-  // margin) so it sits close to the real screen edge without looking pasted flush against
-  // it. Web's table already spans the full viewport height, so this gap is always 0 there
-  // and the original percentage-based anchor is left untouched.
-  const handBottomGapPx =
+  // Web keeps the table vertically centered within the safe area. Native bottom-anchors it
+  // instead, so the table's own bottom edge touches the bottom of the safe area (the true
+  // screen edge, now that the status/nav bars are hidden).
+  const tableTopPx =
     Platform.OS === 'web'
-      ? 0
-      : Math.max(0, winHeight - (tableTopPx + boxHeight) - HAND_BOTTOM_MARGIN_NATIVE_PX);
+      ? insets.top + (availableHeight - renderedBoxHeight) / 2
+      : insets.top + availableHeight - renderedBoxHeight;
+  // The hand is anchored inside the table's own coordinate space (so its width/centering
+  // still track the table), pulled up from the table's own bottom edge by a small deliberate
+  // margin so it doesn't look pasted flush against it. Web's handWrap uses its own unrelated
+  // percentage-based anchor and never reads this.
+  const handBottomGapPx = HAND_BOTTOM_MARGIN_NATIVE_PX;
+  // Where the soundboard button actually sits on the real screen (not just within the table's
+  // own coordinate space), so the Modal-based popup below can anchor near it despite living in
+  // its own top-level window rather than TableWrap's view tree.
+  const soundboardPanelLeftPx = insets.left + (availableWidth - boxWidth) / 2 + 18;
+  const soundboardPanelBottomPx = winHeight - (tableTopPx + renderedBoxHeight) + 14;
 
   return (
     <View
@@ -806,12 +1063,91 @@ export default function GameTableScreen(): React.JSX.Element {
         </View>
       </Modal>
 
+      <ProfileModal
+        canRequestCards={canRequestFromProfileModalPlayer}
+        isRequestingCards={
+          profileModalPlayer !== null && pendingTransferTargetId === profileModalPlayer.id
+        }
+        onClose={() => setReactionTargetId(null)}
+        onRequestCards={() => {
+          if (profileModalPlayer === null) {
+            return;
+          }
+          const targetId = profileModalPlayer.id;
+          setReactionTargetId(null);
+          setPendingTransferTargetId(targetId);
+          void requestCardTransfer(targetId).then((accepted) => {
+            // The server rejected the request outright (e.g. a stale press just after the
+            // turn moved on) — nothing was ever sent to the target, so don't leave this
+            // player's screen stuck on "Asking…".
+            if (!accepted) {
+              setPendingTransferTargetId(null);
+            }
+          });
+        }}
+        onSelectReaction={(reaction) => {
+          if (profileModalPlayer === null) {
+            return;
+          }
+          void reactToPlayer(profileModalPlayer.id, reaction);
+          setReactionTargetId(null);
+        }}
+        player={profileModalPlayer}
+      />
+
+      {/* A real Modal (its own top-level native window) rather than an absolutely-positioned
+          sibling View + dismiss-overlay pair — that ad-hoc pattern rendered fine but its
+          ScrollView never actually engaged Android's native scroll gesture, most likely due to
+          touch-stacking ambiguity with the overlapping dismiss overlay. A Modal sidesteps that
+          entirely, matching every other popup on this screen. */}
+      <Modal animationType="fade" onRequestClose={() => setSoundboardOpen(false)} transparent visible={soundboardOpen}>
+        <View style={styles.soundboardModalRoot}>
+          <Pressable
+            accessibilityLabel="Close soundboard"
+            accessibilityRole="button"
+            onPress={() => setSoundboardOpen(false)}
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            style={[
+              styles.soundboardPanel,
+              { bottom: soundboardPanelBottomPx, left: soundboardPanelLeftPx },
+            ]}
+          >
+            <ScrollView
+              contentContainerStyle={styles.soundboardGrid}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              style={styles.soundboardScroll}
+            >
+              {FUN_SOUND_OPTIONS.map((soundId) => (
+                <Pressable
+                  accessibilityLabel={`Play ${soundId.replace(/-/g, ' ')} sound`}
+                  disabled={isAnySoundPlaying}
+                  key={soundId}
+                  onPress={() => {
+                    setSoundboardOpen(false);
+                    void playFunSound(soundId);
+                  }}
+                  style={[styles.soundboardCell, isAnySoundPlaying && styles.soundboardCellDisabled]}
+                >
+                  <Text style={styles.soundboardEmoji}>{FUN_SOUND_SYMBOLS[soundId]}</Text>
+                  <Text numberOfLines={2} style={styles.soundboardLabel}>
+                    {soundId.replace(/-/g, ' ')}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <TableWrap
         onLayout={(event) => setTableSize(event.nativeEvent.layout)}
         style={[
           styles.table,
           {
-            height: boxHeight,
+            height: renderedBoxHeight,
             left: insets.left + (availableWidth - boxWidth) / 2,
             top: tableTopPx,
             width: boxWidth,
@@ -932,31 +1268,35 @@ export default function GameTableScreen(): React.JSX.Element {
             return player.cardsRemaining;
           })();
           const fanCount = Math.max(1, Math.min(displayedCardsRemaining, 5));
-          const canRequestFromThisPlayer =
-            canRequestCardTransfer && !isOut && player.status === 'ACTIVE';
           return (
             <Pressable
               accessibilityLabel={`${player.name}'s profile`}
               key={player.id}
               onPress={() => setReactionTargetId((current) => (current === player.id ? null : player.id))}
-              style={[styles.seat, { left: `${seat.x}%`, top: `${seat.y}%` }]}
+              style={[styles.seat, seatSizeStyle, { left: `${seat.x}%`, top: `${seat.y}%` }]}
             >
               <View style={styles.avatarWrap}>
                 <View
                   style={[
                     styles.playerAvatar,
+                    avatarSizeStyle,
                     isTurn && styles.activeAvatar,
                     isOut && styles.outAvatar,
                   ]}
                 >
-                  <Text style={styles.playerAvatarText}>{AVATAR_SYMBOLS[player.avatar]}</Text>
+                  <Image
+                    resizeMode="cover"
+                    source={AVATAR_IMAGES[player.avatar]}
+                    style={styles.playerAvatarImage}
+                  />
                 </View>
+                {funSoundFlashPlayerIds.has(player.id) && <AvatarFlash sizePx={avatarSizePx} />}
               </View>
               <Text
                 adjustsFontSizeToFit
                 minimumFontScale={0.6}
                 numberOfLines={1}
-                style={styles.playerName}
+                style={[styles.playerName, playerNameSizeStyle]}
               >
                 {player.name}
               </Text>
@@ -970,7 +1310,10 @@ export default function GameTableScreen(): React.JSX.Element {
                   {statusBadgeLabels[player.status as 'SPECTATING' | 'LEFT']}
                 </Text>
               )}
-              {!isOut && displayedCardsRemaining > 0 && (
+              {/* Android landscape drops the face-down mini-card fan to keep the (now
+                  larger) profile icons uncluttered. The exact card count never shows on the
+                  table on either platform any more — it's in the profile modal instead. */}
+              {Platform.OS === 'web' && !isOut && displayedCardsRemaining > 0 && (
                 <View style={styles.seatCardFan}>
                   {Array.from({ length: fanCount }).map((_, fanIndex) => (
                     <PlayingCard
@@ -981,62 +1324,62 @@ export default function GameTableScreen(): React.JSX.Element {
                       style={[styles.fanCard, { marginLeft: fanIndex === 0 ? 0 : -18 }]}
                     />
                   ))}
-                  {showCardCounts && (
-                    <View style={styles.cardCountBadge}>
-                      <Text style={styles.cardCountText}>{displayedCardsRemaining}</Text>
-                    </View>
-                  )}
-                </View>
-              )}
-              {reactionTargetId === player.id && (
-                <View style={styles.reactionOptions}>
-                  {REACTION_OPTIONS.map((reaction) => (
-                    <Pressable
-                      accessibilityLabel={`Send ${reaction} reaction to ${player.name}`}
-                      key={reaction}
-                      onPress={() => {
-                        void reactToPlayer(player.id, reaction as ReactionId);
-                        setReactionTargetId(null);
-                      }}
-                      style={styles.reactionButton}
-                    >
-                      <Text style={styles.reactionSymbol}>{REACTION_SYMBOLS[reaction]}</Text>
-                    </Pressable>
-                  ))}
-                  {canRequestFromThisPlayer && (
-                    <Pressable
-                      accessibilityLabel={`Request all of ${player.name}'s cards`}
-                      onPress={() => {
-                        setReactionTargetId(null);
-                        setPendingTransferTargetId(player.id);
-                        void requestCardTransfer(player.id).then((accepted) => {
-                          // The server rejected the request outright (e.g. a stale press
-                          // just after the turn moved on) — nothing was ever sent to the
-                          // target, so don't leave this player's screen stuck on "ASKING…".
-                          if (!accepted) {
-                            setPendingTransferTargetId(null);
-                          }
-                        });
-                      }}
-                      style={[styles.reactionButton, styles.requestCardsButton]}
-                    >
-                      <Ionicons color={palette.white} name="flag" size={15} />
-                    </Pressable>
-                  )}
                 </View>
               )}
             </Pressable>
           );
         })}
 
+        {reactionFlights.map((flight) => {
+          const fromPlayer = gameState.players.find((player) => player.id === flight.fromPlayerId);
+          const targetPlayer = gameState.players.find(
+            (player) => player.id === flight.targetPlayerId,
+          );
+          const fromSeat = fromPlayer !== undefined ? seatFor(fromPlayer) : ME_SEAT;
+          const toSeat = targetPlayer !== undefined ? seatFor(targetPlayer) : ME_SEAT;
+          return (
+            <ReactionFlyer
+              fromXPercent={fromSeat.x}
+              fromYPercent={fromSeat.y}
+              key={flight.id}
+              onComplete={() => removeReactionFlight(flight.id)}
+              reactionId={flight.reaction}
+              scale={responsiveScale}
+              tableHeightPx={tableSize.height}
+              tableWidthPx={tableSize.width}
+              toXPercent={toSeat.x}
+              toYPercent={toSeat.y}
+            />
+          );
+        })}
+
+        {funSoundFlashes.map((flash) => (
+          <FunSoundPlayback
+            key={flash.id}
+            onComplete={() => removeFunSoundFlash(flash.id)}
+            soundId={flash.soundId}
+          />
+        ))}
+
         {myPlayer !== undefined && Platform.OS === 'web' && (
           <View
-            style={[styles.seat, { left: '50%', marginLeft: myLabelOffsetPx, top: '80%', zIndex: 999 }]}
+            style={[
+              styles.seat,
+              seatSizeStyle,
+              { left: '50%', marginLeft: myLabelOffsetPx, top: '80%', zIndex: 999 },
+            ]}
           >
-            <View style={styles.playerAvatar}>
-              <Text style={styles.playerAvatarText}>{AVATAR_SYMBOLS[myPlayer.avatar]}</Text>
+            <View style={styles.avatarWrap}>
+              <View style={[styles.playerAvatar, avatarSizeStyle]}>
+                <Image
+                  resizeMode="cover"
+                  source={AVATAR_IMAGES[myPlayer.avatar]}
+                  style={styles.playerAvatarImage}
+                />
+              </View>
+              {funSoundFlashPlayerIds.has(myPlayer.id) && <AvatarFlash sizePx={avatarSizePx} />}
             </View>
-            <Text numberOfLines={1} style={styles.playerName}>
+            <Text numberOfLines={1} style={[styles.playerName, playerNameSizeStyle]}>
               You ({myPlayer.name})
             </Text>
           </View>
@@ -1265,7 +1608,15 @@ export default function GameTableScreen(): React.JSX.Element {
             })()}
         </View>
 
-        <View style={styles.sortButtonGroup}>
+        <View style={styles.soundboardAnchor}>
+          <Pressable
+            accessibilityLabel="Open the soundboard"
+            accessibilityRole="button"
+            onPress={() => setSoundboardOpen((current) => !current)}
+            style={styles.soundboardButton}
+          >
+            <Ionicons color={palette.ink} name="musical-notes" size={18} />
+          </Pressable>
           <Pressable
             accessibilityLabel="Sort cards by suit, highest to lowest"
             accessibilityRole="button"
@@ -1280,7 +1631,7 @@ export default function GameTableScreen(): React.JSX.Element {
           style={[
             styles.handWrap,
             Platform.OS !== 'web' && {
-              bottom: -handBottomGapPx,
+              bottom: handBottomGapPx,
               marginTop: 0,
               top: undefined,
             },
@@ -1307,21 +1658,86 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   activeAvatar: {
-    backgroundColor: palette.red,
+    borderColor: palette.red,
+    borderWidth: 3,
   },
-  cardCountBadge: {
+  cryingDonkeyImage: {
+    height: 110,
+    marginTop: 14,
+    width: 110,
+  },
+  gameOverBackdrop: {
+    backgroundColor: 'rgba(23, 33, 43, 0.92)',
+    flex: 1,
+  },
+  gameOverCard: {
+    alignSelf: 'center',
+    backgroundColor: palette.paper,
+    borderRadius: 24,
+    maxWidth: 520,
+    padding: 24,
+    width: '100%',
+  },
+  gameOverCloseButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-end',
     backgroundColor: palette.ink,
-    borderRadius: 9,
-    marginLeft: 4,
-    minWidth: 18,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
   },
-  cardCountText: {
-    color: palette.white,
-    fontSize: 10,
-    fontWeight: '800',
-    textAlign: 'center',
+  gameOverScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  loserAvatar: {
+    borderColor: palette.red,
+    borderWidth: 3,
+  },
+  loserColumn: {
+    alignItems: 'center',
+    backgroundColor: '#F4E1DD',
+  },
+  resultAvatar: {
+    borderRadius: 28,
+    height: 56,
+    overflow: 'hidden',
+    width: 56,
+  },
+  resultAvatarImage: {
+    height: '100%',
+    width: '100%',
+  },
+  resultColumn: {
+    backgroundColor: palette.white,
+    borderRadius: 16,
+    flex: 1,
+    gap: 10,
+    padding: 14,
+  },
+  resultColumnHeading: {
+    color: palette.muted,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  resultColumns: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  resultPlayerName: {
+    color: palette.ink,
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  resultPlayerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
   },
   centerPlayArea: {
     alignItems: 'center',
@@ -1409,13 +1825,13 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   outAvatar: {
-    backgroundColor: '#D9D3C6',
+    opacity: 0.5,
   },
   outText: {
     color: palette.muted,
     fontSize: 9,
     fontWeight: '900',
-    marginTop: 2,
+    marginTop: 4,
   },
   playedCard: {
     position: 'absolute',
@@ -1423,58 +1839,31 @@ const styles = StyleSheet.create({
   playerAvatar: {
     alignItems: 'center',
     backgroundColor: '#D9E4D5',
-    borderRadius: 18,
-    height: 36,
+    borderRadius: 32,
+    height: 64,
     justifyContent: 'center',
-    width: 36,
+    overflow: 'hidden',
+    width: 64,
+  },
+  playerAvatarImage: {
+    height: '100%',
+    width: '100%',
   },
   avatarWrap: {
     position: 'relative',
   },
-  // A visually distinct entry in the profile popup — sending a "take all cards" request is
-  // a much bigger deal than a reaction, so it gets its own color instead of blending in
-  // with the emoji buttons.
-  requestCardsButton: {
-    backgroundColor: palette.red,
-  },
-  playerAvatarText: {
-    color: palette.ink,
-    fontSize: 20,
-  },
   playerName: {
     color: palette.white,
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '800',
-    marginTop: 4,
-    maxWidth: 96,
+    marginTop: 6,
+    maxWidth: 132,
     textAlign: 'center',
     // Keeps the name legible whether it's sitting over the dark wood, the blue felt, or —
     // in a tight fit on a narrow table — a light card face it happens to overlap.
     textShadowColor: 'rgba(0, 0, 0, 0.85)',
     textShadowOffset: { height: 1, width: 0 },
     textShadowRadius: 3,
-  },
-  reactionButton: {
-    alignItems: 'center',
-    backgroundColor: palette.white,
-    borderRadius: 14,
-    height: 28,
-    justifyContent: 'center',
-    width: 28,
-  },
-  reactionOptions: {
-    backgroundColor: '#F5D8A4',
-    borderRadius: 12,
-    flexDirection: 'row',
-    gap: 3,
-    marginTop: 5,
-    padding: 3,
-    position: 'absolute',
-    top: 70,
-    zIndex: 5,
-  },
-  reactionSymbol: {
-    fontSize: 16,
   },
   reactionToast: {
     backgroundColor: palette.white,
@@ -1506,10 +1895,10 @@ const styles = StyleSheet.create({
   },
   seat: {
     alignItems: 'center',
-    marginLeft: -48,
-    marginTop: -18,
+    marginLeft: -66,
+    marginTop: -32,
     position: 'absolute',
-    width: 96,
+    width: 132,
     zIndex: 3,
   },
   settingsAnchor: {
@@ -1567,18 +1956,76 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  sortButtonGroup: {
-    bottom: 14,
-    flexDirection: 'row',
-    gap: 6,
-    position: 'absolute',
-    right: 18,
-    zIndex: 500,
-  },
   sortButtonText: {
     color: palette.ink,
     fontSize: 11,
     fontWeight: '800',
+  },
+  soundboardAnchor: {
+    alignItems: 'center',
+    bottom: 14,
+    flexDirection: 'row',
+    gap: 8,
+    left: 18,
+    position: 'absolute',
+    zIndex: 500,
+  },
+  soundboardButton: {
+    alignItems: 'center',
+    backgroundColor: palette.white,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  soundboardCell: {
+    alignItems: 'center',
+    backgroundColor: '#F3F0E8',
+    borderRadius: 10,
+    justifyContent: 'center',
+    paddingVertical: 6,
+    width: 64,
+  },
+  soundboardCellDisabled: {
+    opacity: 0.35,
+  },
+  soundboardEmoji: {
+    fontSize: 20,
+  },
+  soundboardGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    padding: 8,
+  },
+  soundboardLabel: {
+    color: palette.muted,
+    fontSize: 8,
+    fontWeight: '700',
+    marginTop: 2,
+    textAlign: 'center',
+    textTransform: 'capitalize',
+  },
+  // The ScrollView needs its OWN bounded height to know when to start scrolling — setting
+  // maxHeight only on the panel around it just clips the overflow instead of scrolling it.
+  // A fixed (not max-) height/width, deliberately: an absolutely-positioned parent whose own
+  // size is itself only bounded by maxHeight left the ScrollView's real scrollable viewport
+  // ambiguous on Android — it rendered fine but never actually engaged native scrolling.
+  // Pinning both to definite numbers removes that ambiguity on every platform.
+  soundboardScroll: {
+    height: 240,
+    width: 224,
+  },
+  soundboardModalRoot: {
+    flex: 1,
+  },
+  soundboardPanel: {
+    backgroundColor: palette.white,
+    borderRadius: 12,
+    height: 240,
+    overflow: 'hidden',
+    position: 'absolute',
+    width: 224,
   },
   seatCardFan: {
     alignItems: 'center',
@@ -1619,20 +2066,25 @@ const styles = StyleSheet.create({
     left: 0,
     position: 'absolute',
     right: 0,
-    top: 12,
+    bottom: 0,
     zIndex: 40,
   },
   askingText: {
     color: palette.red,
     fontSize: 9,
     fontWeight: '900',
-    marginTop: 2,
+    marginTop: 4,
   },
   turnText: {
-    color: palette.saffron,
-    fontSize: 9,
+    backgroundColor: palette.saffron,
+    borderRadius: 6,
+    color: palette.ink,
+    fontSize: 10,
     fontWeight: '900',
-    marginTop: 2,
+    marginTop: 4,
+    overflow: 'hidden',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
   },
   viewport: {
     backgroundColor: '#3B2A1E',
@@ -1647,6 +2099,6 @@ const styles = StyleSheet.create({
     color: palette.saffron,
     fontSize: 9,
     fontWeight: '900',
-    marginTop: 2,
+    marginTop: 4,
   },
 });

@@ -8,10 +8,17 @@ import type {
   ServerToClientEvents,
   PublicGameState,
   AvatarId,
+  FunSoundId,
   ReactionId,
   VisibleCard,
 } from '@gadha-chor/shared-types';
 import { clearSession, loadSession, saveSession } from '../utils/sessionStorage';
+import {
+  PREVIEW_PLAYER_ID,
+  PREVIEW_WALLET_BALANCE,
+  createPreviewGameState,
+  createPreviewRoom,
+} from '../dev/previewFixtures';
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -38,6 +45,11 @@ export type TransferResolution = {
   readonly cardCount: number;
 };
 
+export type FunSoundPlayed = {
+  readonly playerId: string;
+  readonly soundId: FunSoundId;
+};
+
 export type InaamEvent = {
   readonly giverId: string;
   readonly receiverId: string;
@@ -56,6 +68,9 @@ type RoomStore = {
   readonly incomingTransferRequest: IncomingTransferRequest | null;
   readonly transferResolution: TransferResolution | null;
   readonly lastInaam: InaamEvent | null;
+  readonly lastFunSound: FunSoundPlayed | null;
+  readonly previewMode: boolean;
+  enterPreviewMode: () => void;
   connect: () => GameSocket;
   clearError: () => void;
   clearLastCompletedChaal: () => void;
@@ -72,10 +87,12 @@ type RoomStore = {
   startGame: () => Promise<boolean>;
   playCard: (cardId: string) => Promise<boolean>;
   reactToPlayer: (targetPlayerId: string, reaction: ReactionId) => Promise<boolean>;
+  playFunSound: (soundId: FunSoundId) => Promise<boolean>;
   requestCardTransfer: (targetPlayerId: string) => Promise<boolean>;
   respondCardTransfer: (accept: boolean) => Promise<boolean>;
   leaveGame: () => Promise<boolean>;
   spectateGame: () => Promise<boolean>;
+  playAgain: () => Promise<boolean>;
   kickPlayer: (targetPlayerId: string) => Promise<boolean>;
   exitGame: () => Promise<boolean>;
   restoreSession: () => Promise<boolean>;
@@ -100,6 +117,23 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   incomingTransferRequest: null,
   transferResolution: null,
   lastInaam: null,
+  lastFunSound: null,
+  previewMode: false,
+  // Dev-only: opens the real game screen against local mock data instead of a socket
+  // connection, so the table UI can be reloaded and inspected without creating/joining a
+  // room. Never invoked outside __DEV__ (see index.tsx) and every mutating action below
+  // short-circuits into a local simulation whenever previewMode is true, so this can never
+  // reach the server or affect a real game.
+  enterPreviewMode: () => {
+    set({
+      error: null,
+      gameState: createPreviewGameState(),
+      playerId: PREVIEW_PLAYER_ID,
+      previewMode: true,
+      room: createPreviewRoom(),
+      walletBalance: PREVIEW_WALLET_BALANCE,
+    });
+  },
   connect: () => {
     const existingSocket = get().socket;
     if (existingSocket !== null) {
@@ -110,7 +144,12 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     }
 
     const socket: GameSocket = io(serverUrl, { autoConnect: false });
-    socket.on('room:updated', (room) => set({ room }));
+    // A room going back to 'LOBBY' (via playAgain) means the previous match's gameState is
+    // stale — there's no game any more until the host starts a new one, so drop it here rather
+    // than leaving the game screen stuck showing the finished match.
+    socket.on('room:updated', (room) =>
+      set({ gameState: room.status === 'LOBBY' ? null : get().gameState, room }),
+    );
     socket.on('game:started', (gameState) => set({ gameState }));
     socket.on('game:state', (gameState) => set({ gameState }));
     socket.on('game:over', ({ state }) => set({ gameState: state }));
@@ -120,6 +159,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         set((state) => (state.latestReaction === reaction ? { latestReaction: null } : state));
       }, 5000);
     });
+    // No auto-clear timer here (unlike latestReaction's toast) — every event is a fresh object
+    // reference from the socket, which is all game.tsx's flash-triggering effect needs to
+    // detect a new play, even an identical sound played twice in a row.
+    socket.on('sound:played', (payload) => set({ lastFunSound: payload }));
     socket.on('wallet:updated', ({ balance }) => set({ walletBalance: balance }));
     socket.on('chaal:completed', ({ winnerId, cards }) =>
       set({ lastCompletedChaal: { winnerId, cards } }),
@@ -251,6 +294,66 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
   },
   playCard: (cardId) => {
+    if (get().previewMode) {
+      const current = get().gameState;
+      if (current === null || current.currentPlayerId !== PREVIEW_PLAYER_ID) {
+        return Promise.resolve(false);
+      }
+      const playedCard = current.ownCards.find((candidate) => candidate.id === cardId);
+      if (playedCard === undefined) {
+        return Promise.resolve(false);
+      }
+      const activePlayers = current.players.filter((player) => player.status === 'ACTIVE');
+      const wasFreshChaal = current.currentChaal.length === 0;
+      // Opponents never auto-play in this preview simulation, so a real 4-way trick can never
+      // naturally complete. To make the game-over screen (and its win/loss lists) quick to
+      // test, the very first chaal you lead ends the match immediately instead of continuing
+      // to wait on bots that will never move.
+      if (wasFreshChaal) {
+        const gadhaChor =
+          current.players.find(
+            (player) => player.id !== PREVIEW_PLAYER_ID && player.status === 'ACTIVE',
+          ) ?? current.players[1];
+        set({
+          gameState: {
+            ...current,
+            currentChaal: [],
+            gadhaChorId: gadhaChor?.id ?? PREVIEW_PLAYER_ID,
+            ownCards: current.ownCards.filter((card) => card.id !== cardId),
+            players: current.players.map((player) => ({
+              ...player,
+              status: player.id === (gadhaChor?.id ?? PREVIEW_PLAYER_ID) ? 'ACTIVE' : 'FINISHED',
+            })),
+            status: 'GAME_OVER',
+          },
+        });
+        return Promise.resolve(true);
+      }
+      const nextChaal = [
+        ...current.currentChaal,
+        { card: playedCard, isInaam: false, playerId: PREVIEW_PLAYER_ID },
+      ];
+      const trickFinished = nextChaal.length >= activePlayers.length;
+      const currentIndex = activePlayers.findIndex((player) => player.id === PREVIEW_PLAYER_ID);
+      const nextPlayerId =
+        activePlayers[(currentIndex + 1) % activePlayers.length]?.id ?? PREVIEW_PLAYER_ID;
+      set({
+        gameState: {
+          ...current,
+          chaalLeaderId: current.chaalLeaderId,
+          currentChaal: trickFinished ? [] : nextChaal,
+          currentPlayerId: nextPlayerId,
+          ownCards: current.ownCards.filter((card) => card.id !== cardId),
+          players: current.players.map((player) =>
+            player.id === PREVIEW_PLAYER_ID
+              ? { ...player, cardsRemaining: player.cardsRemaining - 1 }
+              : player,
+          ),
+          requiredSuit: trickFinished ? undefined : current.requiredSuit,
+        },
+      });
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('card:play', { cardId }, (response) => {
@@ -266,6 +369,14 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
   },
   reactToPlayer: (targetPlayerId, reaction) => {
+    if (get().previewMode) {
+      const notification = { fromPlayerId: PREVIEW_PLAYER_ID, reaction, targetPlayerId };
+      set({ latestReaction: notification });
+      setTimeout(() => {
+        set((state) => (state.latestReaction === notification ? { latestReaction: null } : state));
+      }, 5000);
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('player:react', { targetPlayerId, reaction }, (response) => {
@@ -280,7 +391,62 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       });
     });
   },
+  playFunSound: (soundId) => {
+    if (get().previewMode) {
+      set({ lastFunSound: { playerId: PREVIEW_PLAYER_ID, soundId } });
+      return Promise.resolve(true);
+    }
+    const socket = get().connect();
+    return new Promise((resolve) => {
+      socket.emit('sound:play', { soundId }, (response) => {
+        const error = responseError(response);
+        if (error !== null) {
+          set({ error });
+          resolve(false);
+          return;
+        }
+        set({ error: null });
+        resolve(true);
+      });
+    });
+  },
   requestCardTransfer: (targetPlayerId) => {
+    if (get().previewMode) {
+      // Simulate the target accepting a beat later, so the "ASKING…" badge and the
+      // card-transfer sweep animation are both visible in the preview, same as a real
+      // accepted request would look.
+      setTimeout(() => {
+        const current = get().gameState;
+        if (current === null) {
+          return;
+        }
+        const target = current.players.find((player) => player.id === targetPlayerId);
+        const cardCount = target?.cardsRemaining ?? 0;
+        set({
+          gameState: {
+            ...current,
+            ownCards: [
+              ...current.ownCards,
+              ...Array.from({ length: cardCount }, (_, index) => ({
+                id: `preview-transferred-${index}`,
+                rank: 2 as const,
+                suit: 'spades' as const,
+              })),
+            ],
+            players: current.players.map((player) =>
+              player.id === targetPlayerId ? { ...player, cardsRemaining: 0 } : player,
+            ),
+          },
+          transferResolution: {
+            accepted: true,
+            cardCount,
+            requesterId: PREVIEW_PLAYER_ID,
+            targetId: targetPlayerId,
+          },
+        });
+      }, 700);
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('card:requestTransfer', { targetPlayerId }, (response) => {
@@ -296,6 +462,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
   },
   respondCardTransfer: (accept) => {
+    if (get().previewMode) {
+      set({ incomingTransferRequest: null });
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('card:respondTransfer', { accept }, (response) => {
@@ -312,6 +482,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
   },
   leaveGame: () => {
+    if (get().previewMode) {
+      set({ error: null, gameState: null, playerId: null, previewMode: false, room: null });
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('game:leave', (response) => {
@@ -328,9 +502,44 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
   },
   spectateGame: () => {
+    if (get().previewMode) {
+      const current = get().gameState;
+      if (current !== null) {
+        set({
+          gameState: {
+            ...current,
+            players: current.players.map((player) =>
+              player.id === PREVIEW_PLAYER_ID ? { ...player, status: 'SPECTATING' } : player,
+            ),
+          },
+        });
+      }
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('game:spectate', (response) => {
+        const error = responseError(response);
+        if (error !== null) {
+          set({ error });
+          resolve(false);
+          return;
+        }
+        set({ error: null });
+        resolve(true);
+      });
+    });
+  },
+  playAgain: () => {
+    if (get().previewMode) {
+      // There's no real lobby to return to in preview mode — just regenerate a fresh mock
+      // match in place, same as tapping the dev entry point again.
+      get().enterPreviewMode();
+      return Promise.resolve(true);
+    }
+    const socket = get().connect();
+    return new Promise((resolve) => {
+      socket.emit('room:playAgain', (response) => {
         const error = responseError(response);
         if (error !== null) {
           set({ error });
@@ -358,6 +567,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     });
   },
   exitGame: () => {
+    if (get().previewMode) {
+      set({ error: null, gameState: null, playerId: null, previewMode: false, room: null });
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('game:exit', (response) => {
@@ -400,6 +613,6 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   },
   returnHome: () => {
     clearSession();
-    set({ room: null, gameState: null, playerId: null, error: null });
+    set({ room: null, gameState: null, playerId: null, error: null, previewMode: false });
   },
 }));

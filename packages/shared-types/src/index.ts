@@ -1,5 +1,6 @@
 export type {
   AvatarId,
+  FunSoundId,
   ReactionId,
   ActionResponse,
   ClientToServerEvents,
@@ -12,7 +13,8 @@ export type {
 } from './socket.types.js';
 export {
   AVATAR_OPTIONS,
-  AVATAR_SYMBOLS,
+  FUN_SOUND_OPTIONS,
+  FUN_SOUND_SYMBOLS,
   REACTION_OPTIONS,
   REACTION_SYMBOLS,
 } from './socket.types.js';

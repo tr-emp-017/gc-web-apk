@@ -2,16 +2,45 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { Screen, palette } from '../src/components/Screen';
 
 import { PrimaryButton } from '../src/components/PrimaryButton';
+import { useRef } from 'react';
 import { useRouter } from 'expo-router';
+import { useRoomStore } from '../src/stores/roomStore';
+
+// Tapping the title this many times within the window below jumps straight into UI Preview
+// Mode — the same trick Android uses to unlock developer options. Unlike the __DEV__-gated
+// button further down (which only exists in local dev builds), this works in every build
+// including production, so it's the only way to reach the preview screen there — but nobody
+// stumbles into it by accident, since it's not a visible control.
+const PREVIEW_UNLOCK_TAP_COUNT = 7;
+const PREVIEW_UNLOCK_WINDOW_MS = 3000;
 
 export default function HomeScreen(): React.JSX.Element {
   const router = useRouter();
+  const enterPreviewMode = useRoomStore((state) => state.enterPreviewMode);
+  const titleTapCountRef = useRef(0);
+  const titleTapWindowStartRef = useRef(0);
+
+  function handleTitleTap(): void {
+    const now = Date.now();
+    if (now - titleTapWindowStartRef.current > PREVIEW_UNLOCK_WINDOW_MS) {
+      titleTapCountRef.current = 0;
+      titleTapWindowStartRef.current = now;
+    }
+    titleTapCountRef.current += 1;
+    if (titleTapCountRef.current >= PREVIEW_UNLOCK_TAP_COUNT) {
+      titleTapCountRef.current = 0;
+      enterPreviewMode();
+      router.push('/game');
+    }
+  }
 
   return (
     <Screen>
       <View style={styles.header}>
         <Text style={styles.kicker}>DELHI • NORTH INDIA</Text>
-        <Text style={styles.title}>{'GADHA\nCHOR'}</Text>
+        <Text onPress={handleTitleTap} style={styles.title}>
+          {'GADHA\nCHOR'}
+        </Text>
         <Text style={styles.subtitle}>Lose your cards. Keep your dignity.</Text>
       </View>
 
@@ -30,6 +59,17 @@ export default function HomeScreen(): React.JSX.Element {
           variant="secondary"
         />
       </View>
+
+      {__DEV__ && (
+        <PrimaryButton
+          label="🛠 UI Preview Mode (dev)"
+          onPress={() => {
+            enterPreviewMode();
+            router.push('/game');
+          }}
+          variant="secondary"
+        />
+      )}
 
       <Text style={styles.footer}>A fast local card game for 3–6 friends.</Text>
     </Screen>

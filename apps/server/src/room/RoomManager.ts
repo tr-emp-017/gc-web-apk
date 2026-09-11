@@ -169,6 +169,27 @@ export class RoomManager {
     player.ready = room.hostPlayerId === playerId ? true : ready;
   }
 
+  // Resets a finished match back to a lobby-ready state for the same room/players — anyone
+  // still in the room can trigger this, since it doesn't itself move any money (entry points
+  // are only deducted again once the host presses startGame, same as the very first game).
+  // publicRoom's status is derived from room.game (undefined => 'LOBBY'), so clearing it here
+  // is what actually moves the room back to the lobby for every client.
+  playAgain(code: string, playerId: string): void {
+    const room = this.getRoom(code);
+    this.getPlayerFromRoom(room, playerId);
+    if (room.game === undefined || room.game.getState().status !== 'GAME_OVER') {
+      throw new Error('The current match has not finished yet.');
+    }
+    delete room.game;
+    delete room.pool;
+    delete room.startedPlayerCount;
+    delete room.pendingTransferRequest;
+    for (const roomPlayer of room.players.values()) {
+      roomPlayer.ready = room.hostPlayerId === roomPlayer.id;
+      delete roomPlayer.postGameChoice;
+    }
+  }
+
   startGame(
     code: string,
     playerId: string,

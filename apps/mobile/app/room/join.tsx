@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
@@ -6,16 +6,28 @@ import { Screen, palette } from '../../src/components/Screen';
 import { useRoomStore } from '../../src/stores/roomStore';
 import { AvatarPicker } from '../../src/components/AvatarPicker';
 import { generateRandomGamerName } from '../../src/utils/randomName';
+import { loadPlayerName, savePlayerName } from '../../src/utils/playerNameStorage';
 import type { AvatarId } from '@gadha-chor/shared-types';
 
 export default function JoinRoomScreen(): React.JSX.Element {
   const router = useRouter();
   const joinRoom = useRoomStore((state) => state.joinRoom);
   const error = useRoomStore((state) => state.error);
-  const [name, setName] = useState(() => generateRandomGamerName());
+  const [name, setName] = useState('');
   const [code, setCode] = useState('GC-');
-  const [avatar, setAvatar] = useState<AvatarId>('sun');
+  const [avatar, setAvatar] = useState<AvatarId>('beard-glasses');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Prefill with whatever name was remembered from last time on this device (see create.tsx
+  // for the same behavior); fall back to a random one for a first-time player.
+  useEffect(() => {
+    void loadPlayerName().then((stored) => setName(stored ?? generateRandomGamerName()));
+  }, []);
+
+  function updateName(nextName: string): void {
+    setName(nextName);
+    void savePlayerName(nextName);
+  }
 
   // Every room code the server generates is "GC-" followed by 4 digits, so keep that
   // prefix always present — the player only ever needs to type the digits.
@@ -61,7 +73,7 @@ export default function JoinRoomScreen(): React.JSX.Element {
           <TextInput
             autoCapitalize="words"
             autoCorrect={false}
-            onChangeText={setName}
+            onChangeText={updateName}
             placeholder="e.g. Rahul"
             placeholderTextColor="#9A958B"
             style={[styles.input, styles.nameInput]}
@@ -70,7 +82,7 @@ export default function JoinRoomScreen(): React.JSX.Element {
           <Pressable
             accessibilityLabel="Generate a random gamer name"
             accessibilityRole="button"
-            onPress={() => setName(generateRandomGamerName())}
+            onPress={() => updateName(generateRandomGamerName())}
             style={styles.diceButton}
           >
             <Text style={styles.diceButtonText}>🎲</Text>

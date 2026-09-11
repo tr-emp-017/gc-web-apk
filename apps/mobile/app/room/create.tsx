@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
@@ -6,18 +6,33 @@ import { Screen, palette } from '../../src/components/Screen';
 import { useRoomStore } from '../../src/stores/roomStore';
 import { AvatarPicker } from '../../src/components/AvatarPicker';
 import { generateRandomGamerName } from '../../src/utils/randomName';
+import { loadPlayerName, savePlayerName } from '../../src/utils/playerNameStorage';
 import type { AvatarId } from '@gadha-chor/shared-types';
 
+// The entry-points UI is hidden for now (to come back later) — the server still requires a
+// positive value to create a room, so every room is created with this fixed placeholder.
 const FIXED_ENTRY_POINTS = 100;
 
 export default function CreateRoomScreen(): React.JSX.Element {
   const router = useRouter();
   const createRoom = useRoomStore((state) => state.createRoom);
   const error = useRoomStore((state) => state.error);
-  const [name, setName] = useState(() => generateRandomGamerName());
-  const [avatar, setAvatar] = useState<AvatarId>('sun');
+  const [name, setName] = useState('');
+  const [avatar, setAvatar] = useState<AvatarId>('beard-glasses');
   const [showCardCounts, setShowCardCounts] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Prefill with whatever name was remembered from last time on this device; fall back to a
+  // random one for a first-time player. There's no account system, so this is purely a local
+  // convenience, not tied to who's actually typing.
+  useEffect(() => {
+    void loadPlayerName().then((stored) => setName(stored ?? generateRandomGamerName()));
+  }, []);
+
+  function updateName(nextName: string): void {
+    setName(nextName);
+    void savePlayerName(nextName);
+  }
 
   async function handleCreate(): Promise<void> {
     setIsSubmitting(true);
@@ -43,7 +58,7 @@ export default function CreateRoomScreen(): React.JSX.Element {
           <TextInput
             autoCapitalize="words"
             autoCorrect={false}
-            onChangeText={setName}
+            onChangeText={updateName}
             placeholder="e.g. Aslam"
             placeholderTextColor="#9A958B"
             style={[styles.input, styles.nameInput]}
@@ -52,19 +67,12 @@ export default function CreateRoomScreen(): React.JSX.Element {
           <Pressable
             accessibilityLabel="Generate a random gamer name"
             accessibilityRole="button"
-            onPress={() => setName(generateRandomGamerName())}
+            onPress={() => updateName(generateRandomGamerName())}
             style={styles.diceButton}
           >
             <Text style={styles.diceButtonText}>🎲</Text>
           </Pressable>
         </View>
-        <Text style={styles.label}>Entry points</Text>
-        <TextInput
-          editable={false}
-          style={[styles.input, styles.inputDisabled]}
-          value={`${FIXED_ENTRY_POINTS}`}
-        />
-        <Text style={styles.hint}>Entry points are fixed for now.</Text>
         <View style={styles.toggleRow}>
           <View style={styles.toggleTextWrap}>
             <Text style={styles.label}>Show opponents&apos; card counts</Text>
@@ -139,10 +147,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     minHeight: 56,
     paddingHorizontal: 16,
-  },
-  inputDisabled: {
-    backgroundColor: '#EFEBE2',
-    color: palette.muted,
   },
   label: {
     color: palette.ink,

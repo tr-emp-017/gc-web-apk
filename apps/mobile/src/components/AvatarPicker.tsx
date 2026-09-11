@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { AVATAR_OPTIONS, AVATAR_SYMBOLS, type AvatarId } from '@gadha-chor/shared-types';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AVATAR_OPTIONS, type AvatarId } from '@gadha-chor/shared-types';
+import { AVATAR_IMAGES } from '../constants/avatarImages';
 import { palette } from './Screen';
 
 type AvatarPickerProps = {
@@ -10,7 +11,7 @@ type AvatarPickerProps = {
 export function AvatarPicker({ value, onChange }: AvatarPickerProps): React.JSX.Element {
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>Choose your icon</Text>
+      <Text style={styles.label}>Choose your avatar</Text>
       <View style={styles.options}>
         {AVATAR_OPTIONS.map((avatar) => (
           <Pressable
@@ -20,7 +21,7 @@ export function AvatarPicker({ value, onChange }: AvatarPickerProps): React.JSX.
             onPress={() => onChange(avatar)}
             style={[styles.option, avatar === value && styles.selected]}
           >
-            <Text style={styles.symbol}>{AVATAR_SYMBOLS[avatar]}</Text>
+            <Image resizeMode="cover" source={AVATAR_IMAGES[avatar]} style={styles.image} />
           </Pressable>
         ))}
       </View>
@@ -38,6 +39,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 10,
   },
+  image: {
+    height: '100%',
+    width: '100%',
+  },
   option: {
     alignItems: 'center',
     backgroundColor: palette.white,
@@ -46,19 +51,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 50,
     justifyContent: 'center',
+    overflow: 'hidden',
     width: 50,
   },
   options: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
   selected: {
     backgroundColor: '#F5D8A4',
     borderColor: palette.red,
     borderWidth: 2,
-  },
-  symbol: {
-    color: palette.ink,
-    fontSize: 25,
   },
 });

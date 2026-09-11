@@ -3,27 +3,103 @@ import type { Card, GameStatus } from '@gadha-chor/game-engine';
 export const PLAYER_STATUSES = ['ACTIVE', 'FINISHED', 'SPECTATING', 'LEFT'] as const;
 export type PlayerStatus = (typeof PLAYER_STATUSES)[number];
 
-export const AVATAR_OPTIONS = ['sun', 'moon', 'star', 'bolt', 'leaf', 'crown'] as const;
+// Each id maps to an illustrated avatar image shipped with the mobile app (see
+// apps/mobile/src/constants/avatarImages.ts) — kept as plain ids here, rather than the images
+// themselves, so this package stays platform-agnostic and usable from the server.
+export const AVATAR_OPTIONS = [
+  'beard-glasses',
+  'wink-tongue',
+  'donkey',
+  'cool-hoodie',
+  'peace-sign',
+  'headphones',
+  'game-on-cap',
+  'dreamy-hands',
+  'thinking-glasses',
+  'big-laugh',
+] as const;
 export type AvatarId = (typeof AVATAR_OPTIONS)[number];
 
-export const AVATAR_SYMBOLS: Record<AvatarId, string> = {
-  sun: '☀',
-  moon: '☾',
-  star: '★',
-  bolt: 'ϟ',
-  leaf: '❧',
-  crown: '♛',
-};
-
-export const REACTION_OPTIONS = ['clap', 'heart', 'laugh', 'fire', 'wow'] as const;
+// Playful profile-popup reactions — every reaction is currently free (see the mobile
+// ProfileModal); a price could be attached per-id later without changing this list.
+export const REACTION_OPTIONS = ['rose', 'kiss', 'tea', 'slipper', 'bomb', 'egg'] as const;
 export type ReactionId = (typeof REACTION_OPTIONS)[number];
 
 export const REACTION_SYMBOLS: Record<ReactionId, string> = {
-  clap: '👏',
-  heart: '❤️',
-  laugh: '😂',
-  fire: '🔥',
-  wow: '😮',
+  bomb: '💣',
+  egg: '🥚',
+  kiss: '💋',
+  rose: '🌹',
+  slipper: '🩴',
+  tea: '☕',
+};
+
+// A room-wide "soundboard" — any player can play one of these for everyone to hear, with the
+// player's own profile flashing so it's obvious who triggered it (see the mobile game
+// screen's bottom-left icon).
+export const FUN_SOUND_OPTIONS = [
+  'aayein-meme',
+  'aisa-mat-karo',
+  'aree-bas-kar-bhai',
+  'cartoon-scream',
+  'chala-ja-bsdk',
+  'converted-clip',
+  'donkey-braying',
+  'donkey-classic',
+  'donkey-deep',
+  'donkey-small',
+  'fart',
+  'funny-reaction',
+  'gopgopgop',
+  'huh',
+  'iss-sajjan-ko-kya-takleef-hai-bhai',
+  'khopdi-tor-salay-ka',
+  'ki-kore',
+  'koun-hai-re',
+  'lekin-ye-sala',
+  'lund-pakad-ke-tarazu-ki-tarah-cid',
+  'maa-tari-oo-bhai',
+  'men-laughing',
+  'monkey-classic',
+  'monkey-noise',
+  'mujhe-apne-ghar-jana-hai',
+  'tum-dum-tedau',
+  'wooooaah',
+  'ye-ladki-tum-bohut-bolti-ho-chapad-chapad',
+  'yeah-boy',
+] as const;
+export type FunSoundId = (typeof FUN_SOUND_OPTIONS)[number];
+
+export const FUN_SOUND_SYMBOLS: Record<FunSoundId, string> = {
+  'aayein-meme': '😱',
+  'aisa-mat-karo': '🙅',
+  'aree-bas-kar-bhai': '✋',
+  'cartoon-scream': '😱',
+  'chala-ja-bsdk': '👋',
+  'converted-clip': '🔊',
+  'donkey-braying': '🐴',
+  'donkey-classic': '🐴',
+  'donkey-deep': '🐴',
+  'donkey-small': '🐴',
+  fart: '💨',
+  'funny-reaction': '🤣',
+  gopgopgop: '😋',
+  huh: '🤨',
+  'iss-sajjan-ko-kya-takleef-hai-bhai': '🤷',
+  'khopdi-tor-salay-ka': '💀',
+  'ki-kore': '🗣️',
+  'koun-hai-re': '❓',
+  'lekin-ye-sala': '😤',
+  'lund-pakad-ke-tarazu-ki-tarah-cid': '⚖️',
+  'maa-tari-oo-bhai': '😩',
+  'men-laughing': '😂',
+  'monkey-classic': '🐒',
+  'monkey-noise': '🐒',
+  'mujhe-apne-ghar-jana-hai': '🏠',
+  'tum-dum-tedau': '🥁',
+  wooooaah: '😲',
+  'ye-ladki-tum-bohut-bolti-ho-chapad-chapad': '🗯️',
+  'yeah-boy': '🙌',
 };
 
 export type PublicPlayer = {
@@ -105,6 +181,11 @@ export type ClientToServerEvents = {
   'game:leave': (callback: (response: ActionResponse) => void) => void;
   'game:spectate': (callback: (response: ActionResponse) => void) => void;
   'game:exit': (callback: (response: ActionResponse) => void) => void;
+  // Resets a finished match back to the lobby (same room, same players) for a rematch — does
+  // not itself start a new game; players still ready up and the host still presses
+  // 'game:start' same as the first time, which is what actually reshuffles and deducts entry
+  // points again.
+  'room:playAgain': (callback: (response: ActionResponse) => void) => void;
   'player:ready': (
     payload: { readonly ready: boolean },
     callback: (response: ActionResponse) => void,
@@ -128,6 +209,10 @@ export type ClientToServerEvents = {
   ) => void;
   'card:respondTransfer': (
     payload: { readonly accept: boolean },
+    callback: (response: ActionResponse) => void,
+  ) => void;
+  'sound:play': (
+    payload: { readonly soundId: FunSoundId },
     callback: (response: ActionResponse) => void,
   ) => void;
 };
@@ -200,6 +285,7 @@ export type ServerToClientEvents = {
     // declined.
     readonly cardCount: number;
   }) => void;
+  'sound:played': (payload: { readonly playerId: string; readonly soundId: FunSoundId }) => void;
 };
 
 export type RoomResponse =
