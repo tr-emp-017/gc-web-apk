@@ -252,6 +252,7 @@ export default function GameTableScreen(): React.JSX.Element {
   const gameState = useRoomStore((state) => state.gameState);
   const playerId = useRoomStore((state) => state.playerId);
   const previewMode = useRoomStore((state) => state.previewMode);
+  const botMode = useRoomStore((state) => state.botMode);
   const playCard = useRoomStore((state) => state.playCard);
   const reactToPlayer = useRoomStore((state) => state.reactToPlayer);
   const latestReaction = useRoomStore((state) => state.latestReaction);
@@ -785,10 +786,10 @@ export default function GameTableScreen(): React.JSX.Element {
   // is what sends every player still sitting on this screen (not just whoever pressed the
   // button) back to the lobby to ready up for the next match.
   useEffect(() => {
-    if (!previewMode && gameState === null && room !== null && room.status === 'LOBBY') {
+    if (!previewMode && !botMode && gameState === null && room !== null && room.status === 'LOBBY') {
       router.replace(`/room/${room.code}`);
     }
-  }, [gameState, room, previewMode, router]);
+  }, [gameState, room, previewMode, botMode, router]);
 
   if (gameState === null) {
     return (

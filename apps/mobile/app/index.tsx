@@ -3,8 +3,8 @@ import { Screen, palette } from '../src/components/Screen';
 
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { useRef } from 'react';
-import { useRouter } from 'expo-router';
 import { useRoomStore } from '../src/stores/roomStore';
+import { useRouter } from 'expo-router';
 
 // Tapping the title this many times within the window below jumps straight into UI Preview
 // Mode — the same trick Android uses to unlock developer options. Unlike the __DEV__-gated
@@ -56,6 +56,11 @@ export default function HomeScreen(): React.JSX.Element {
         <PrimaryButton
           label="Join with a code"
           onPress={() => router.push('/room/join')}
+          variant="secondary"
+        />
+        <PrimaryButton
+          label="Play"
+          onPress={() => router.push('/bots/setup')}
           variant="secondary"
         />
       </View>

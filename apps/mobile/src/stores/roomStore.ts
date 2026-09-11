@@ -19,6 +19,9 @@ import {
   createPreviewGameState,
   createPreviewRoom,
 } from '../dev/previewFixtures';
+import { BOT_MATCH_HUMAN_ID, createBotMatch, type BotMatch } from '../bots/botMatch';
+import { pickBotIdentities } from '../bots/botIdentities';
+import type { BotDifficultyId, BotPlayerCount } from '../bots/types';
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -70,7 +73,21 @@ type RoomStore = {
   readonly lastInaam: InaamEvent | null;
   readonly lastFunSound: FunSoundPlayed | null;
   readonly previewMode: boolean;
+  readonly botMode: boolean;
+  readonly botMatch: BotMatch | null;
+  readonly botMatchSettings: {
+    readonly name: string;
+    readonly avatar: AvatarId;
+    readonly playerCount: BotPlayerCount;
+    readonly difficulty: BotDifficultyId;
+  } | null;
   enterPreviewMode: () => void;
+  startBotMatch: (
+    name: string,
+    avatar: AvatarId,
+    playerCount: BotPlayerCount,
+    difficulty: BotDifficultyId,
+  ) => void;
   connect: () => GameSocket;
   clearError: () => void;
   clearLastCompletedChaal: () => void;
@@ -120,6 +137,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   lastInaam: null,
   lastFunSound: null,
   previewMode: false,
+  botMode: false,
+  botMatch: null,
+  botMatchSettings: null,
   // Dev-only: opens the real game screen against local mock data instead of a socket
   // connection, so the table UI can be reloaded and inspected without creating/joining a
   // room. Never invoked outside __DEV__ (see index.tsx) and every mutating action below
@@ -133,6 +153,46 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       previewMode: true,
       room: createPreviewRoom(),
       walletBalance: PREVIEW_WALLET_BALANCE,
+    });
+  },
+  // "Play with Bots": a real, complete game driven by a local GameEngine instance (see
+  // src/bots/botMatch.ts) — never a socket connection — so it's free, instant, and can never
+  // touch the real wallet/entry-points economy. Every mutating action below short-circuits
+  // into calls on the BotMatch instance whenever botMode is true, the same way previewMode
+  // short-circuits into a local simulation above.
+  startBotMatch: (name, avatar, playerCount, difficulty) => {
+    get().botMatch?.destroy();
+    const trimmedName = name.trim().slice(0, 24) || 'You';
+    const human = { avatar, id: BOT_MATCH_HUMAN_ID, name: trimmedName };
+    const bots = pickBotIdentities(playerCount - 1);
+    const match = createBotMatch(human, bots, difficulty, {
+      onCompletedChaal: (event) => set({ lastCompletedChaal: event }),
+      onGameState: (gameState) => set({ gameState }),
+      onInaam: (event) => set({ lastInaam: event }),
+      onIncomingTransferRequest: (event) => set({ incomingTransferRequest: event }),
+      onTransferResolution: (event) => set({ transferResolution: event }),
+    });
+    const initialState = match.getPublicState();
+    set({
+      botMatch: match,
+      botMatchSettings: { avatar, difficulty, name: trimmedName, playerCount },
+      botMode: true,
+      error: null,
+      gameState: initialState,
+      incomingTransferRequest: null,
+      lastCompletedChaal: null,
+      lastInaam: null,
+      playerId: BOT_MATCH_HUMAN_ID,
+      room: {
+        code: 'BOTS',
+        entryPoints: 0,
+        hostPlayerId: BOT_MATCH_HUMAN_ID,
+        players: initialState.players,
+        showCardCounts: true,
+        status: 'PLAYING',
+      },
+      transferResolution: null,
+      walletBalance: null,
     });
   },
   connect: () => {
@@ -355,6 +415,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       });
       return Promise.resolve(true);
     }
+    if (get().botMode) {
+      get().botMatch?.playCard(cardId);
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('card:play', { cardId }, (response) => {
@@ -378,6 +442,16 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       }, 5000);
       return Promise.resolve(true);
     }
+    if (get().botMode) {
+      // Cosmetic-only broadcast — bots don't need to "see" it, just echo locally so the
+      // sender's own flying-emoji effect plays, same as the previewMode branch above.
+      const notification = { fromPlayerId: BOT_MATCH_HUMAN_ID, reaction, targetPlayerId };
+      set({ latestReaction: notification });
+      setTimeout(() => {
+        set((state) => (state.latestReaction === notification ? { latestReaction: null } : state));
+      }, 5000);
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('player:react', { targetPlayerId, reaction }, (response) => {
@@ -395,6 +469,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   playFunSound: (soundId) => {
     if (get().previewMode) {
       set({ lastFunSound: { playerId: PREVIEW_PLAYER_ID, soundId } });
+      return Promise.resolve(true);
+    }
+    if (get().botMode) {
+      set({ lastFunSound: { playerId: BOT_MATCH_HUMAN_ID, soundId } });
       return Promise.resolve(true);
     }
     const socket = get().connect();
@@ -448,6 +526,10 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       }, 700);
       return Promise.resolve(true);
     }
+    if (get().botMode) {
+      get().botMatch?.requestCardTransfer(targetPlayerId);
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('card:requestTransfer', { targetPlayerId }, (response) => {
@@ -465,6 +547,11 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   respondCardTransfer: (accept) => {
     if (get().previewMode) {
       set({ incomingTransferRequest: null });
+      return Promise.resolve(true);
+    }
+    if (get().botMode) {
+      set({ incomingTransferRequest: null });
+      get().botMatch?.respondCardTransfer(accept);
       return Promise.resolve(true);
     }
     const socket = get().connect();
@@ -485,6 +572,19 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   leaveGame: () => {
     if (get().previewMode) {
       set({ error: null, gameState: null, playerId: null, previewMode: false, room: null });
+      return Promise.resolve(true);
+    }
+    if (get().botMode) {
+      get().botMatch?.destroy();
+      set({
+        botMatch: null,
+        botMatchSettings: null,
+        botMode: false,
+        error: null,
+        gameState: null,
+        playerId: null,
+        room: null,
+      });
       return Promise.resolve(true);
     }
     const socket = get().connect();
@@ -517,6 +617,20 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       }
       return Promise.resolve(true);
     }
+    if (get().botMode) {
+      const current = get().gameState;
+      if (current !== null) {
+        set({
+          gameState: {
+            ...current,
+            players: current.players.map((player) =>
+              player.id === BOT_MATCH_HUMAN_ID ? { ...player, status: 'SPECTATING' } : player,
+            ),
+          },
+        });
+      }
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('game:spectate', (response) => {
@@ -536,6 +650,15 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       // There's no real lobby to return to in preview mode — just regenerate a fresh mock
       // match in place, same as tapping the dev entry point again.
       get().enterPreviewMode();
+      return Promise.resolve(true);
+    }
+    if (get().botMode) {
+      // No real lobby here either — rebuild a fresh match with the same seat count/name/
+      // avatar/difficulty the human picked on the setup screen.
+      const settings = get().botMatchSettings;
+      if (settings !== null) {
+        get().startBotMatch(settings.name, settings.avatar, settings.playerCount, settings.difficulty);
+      }
       return Promise.resolve(true);
     }
     const socket = get().connect();
@@ -592,6 +715,19 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       set({ error: null, gameState: null, playerId: null, previewMode: false, room: null });
       return Promise.resolve(true);
     }
+    if (get().botMode) {
+      get().botMatch?.destroy();
+      set({
+        botMatch: null,
+        botMatchSettings: null,
+        botMode: false,
+        error: null,
+        gameState: null,
+        playerId: null,
+        room: null,
+      });
+      return Promise.resolve(true);
+    }
     const socket = get().connect();
     return new Promise((resolve) => {
       socket.emit('game:exit', (response) => {
@@ -634,6 +770,16 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   },
   returnHome: () => {
     clearSession();
-    set({ room: null, gameState: null, playerId: null, error: null, previewMode: false });
+    get().botMatch?.destroy();
+    set({
+      room: null,
+      gameState: null,
+      playerId: null,
+      error: null,
+      previewMode: false,
+      botMode: false,
+      botMatch: null,
+      botMatchSettings: null,
+    });
   },
 }));
