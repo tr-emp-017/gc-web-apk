@@ -17,6 +17,7 @@ export default function RoomLobbyScreen(): React.JSX.Element {
   const setReady = useRoomStore((state) => state.setReady);
   const startGame = useRoomStore((state) => state.startGame);
   const kickPlayer = useRoomStore((state) => state.kickPlayer);
+  const leaveRoom = useRoomStore((state) => state.leaveRoom);
   const error = useRoomStore((state) => state.error);
   const [playerToRemove, setPlayerToRemove] = useState<PublicPlayer | null>(null);
 
@@ -126,6 +127,11 @@ export default function RoomLobbyScreen(): React.JSX.Element {
             onPress={() => void setReady(!(currentPlayer?.ready ?? false))}
           />
         )}
+        <PrimaryButton
+          label="Leave room"
+          onPress={() => void leaveRoom().then((ok) => ok && router.replace('/'))}
+          variant="secondary"
+        />
       </View>
     </Screen>
   );

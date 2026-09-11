@@ -383,6 +383,43 @@ describe('RoomManager', () => {
     });
   });
 
+  describe('leaving the lobby', () => {
+    it('removes a non-host player without disturbing the host', () => {
+      const manager = new RoomManager();
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+
+      manager.leave(host.code, second.playerId);
+
+      const summary = manager.getRoomSummary(host.code);
+      expect(summary.players.map((player) => player.id)).toEqual([host.playerId]);
+      expect(summary.hostPlayerId).toBe(host.playerId);
+    });
+
+    it('promotes the next remaining player to host when the host leaves', () => {
+      const manager = new RoomManager();
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
+
+      manager.leave(host.code, host.playerId);
+
+      const summary = manager.getRoomSummary(host.code);
+      expect(summary.hostPlayerId).toBe(second.playerId);
+      expect(summary.players.map((player) => player.id)).toEqual([second.playerId, third.playerId]);
+      expect(summary.players.find((player) => player.id === second.playerId)?.ready).toBe(true);
+    });
+
+    it('deletes the room once the last player leaves', () => {
+      const manager = new RoomManager();
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+
+      manager.leave(host.code, host.playerId);
+
+      expect(() => manager.getRoomSummary(host.code)).toThrow();
+    });
+  });
+
   describe('exiting mid-game', () => {
     it('immediately ends the game and marks the exiting player as Gadha Chor and LEFT', () => {
       const manager = new RoomManager();

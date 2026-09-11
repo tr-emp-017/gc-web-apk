@@ -94,6 +94,7 @@ type RoomStore = {
   spectateGame: () => Promise<boolean>;
   playAgain: () => Promise<boolean>;
   kickPlayer: (targetPlayerId: string) => Promise<boolean>;
+  leaveRoom: () => Promise<boolean>;
   exitGame: () => Promise<boolean>;
   restoreSession: () => Promise<boolean>;
   returnHome: () => void;
@@ -562,6 +563,26 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
           return;
         }
         set({ error: null });
+        resolve(true);
+      });
+    });
+  },
+  leaveRoom: () => {
+    if (get().previewMode) {
+      set({ error: null, gameState: null, playerId: null, previewMode: false, room: null });
+      return Promise.resolve(true);
+    }
+    const socket = get().connect();
+    return new Promise((resolve) => {
+      socket.emit('room:leave', (response) => {
+        const error = responseError(response);
+        if (error !== null) {
+          set({ error });
+          resolve(false);
+          return;
+        }
+        clearSession();
+        set({ error: null, room: null, gameState: null, playerId: null });
         resolve(true);
       });
     });

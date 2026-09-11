@@ -24,7 +24,7 @@ type RoomPlayer = {
 
 type Room = {
   readonly code: string;
-  readonly hostPlayerId: string;
+  hostPlayerId: string;
   readonly players: Map<string, RoomPlayer>;
   game?: GameEngine;
   reconnectTimers: Map<string, ReturnType<typeof setTimeout>>;
@@ -160,6 +160,15 @@ export class RoomManager {
     room.players.delete(playerId);
     if (room.players.size === 0) {
       this.rooms.delete(room.code);
+      return;
+    }
+    if (room.hostPlayerId === playerId) {
+      const [nextHostId] = room.players.keys();
+      room.hostPlayerId = nextHostId as string;
+      const nextHost = room.players.get(room.hostPlayerId);
+      if (nextHost !== undefined) {
+        nextHost.ready = true;
+      }
     }
   }
 
