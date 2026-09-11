@@ -3,17 +3,19 @@ import { createAudioPlayer, type AudioPlayer } from 'expo-audio';
 
 // Same idea as useSound, but tolerates not having an asset yet (see
 // reactions/reactionEffects.ts's REACTION_SOUND_ASSETS, which starts mostly empty until each
-// sound file arrives) — the returned function just does nothing (and reports 0 duration) until
-// a real asset is passed.
+// sound file arrives) — the returned function just calls onFinish immediately until a real
+// asset is passed.
 //
-// The returned play function also reports back how long the clip actually runs (in
-// milliseconds) — ReactionFlyer uses this to keep its impact effect on screen for at least as
-// long as the sound plays, rather than a fixed guessed duration. A bundled local asset like
-// these has normally finished loading well before the player is actually used (the travel
-// animation runs first), so `player.duration` is already populated by play time; 0 is returned
-// only if that isn't the case yet, or there's no asset at all, and the caller falls back to its
-// own configured duration.
-export function useOptionalSound(assetModule: number | undefined): () => number {
+// The returned play function reports back when the clip has ACTUALLY finished playing, via
+// expo-audio's own 'playbackStatusUpdate' (didJustFinish) event, rather than guessing a
+// duration from `player.duration` right after calling play(). That guess used to work fine on
+// native (a bundled local file's metadata is already available by play time) but was wrong on
+// web: the underlying HTML5 <audio> element only knows its real duration once its
+// 'loadedmetadata' fires asynchronously, which hadn't happened yet — so `player.duration` read
+// 0, callers fell back to their own short configured duration, and unmounted (removing the
+// player) long before the clip actually finished, cutting web playback off after a couple of
+// seconds while native played the full clip.
+export function useOptionalSound(assetModule: number | undefined): (onFinish?: () => void) => void {
   const playerRef = useRef<AudioPlayer | null>(null);
 
   useEffect(() => {
@@ -28,13 +30,19 @@ export function useOptionalSound(assetModule: number | undefined): () => number 
     };
   }, [assetModule]);
 
-  return useCallback(() => {
+  return useCallback((onFinish) => {
     const player = playerRef.current;
     if (player === null) {
-      return 0;
+      onFinish?.();
+      return;
     }
+    const subscription = player.addListener('playbackStatusUpdate', (status) => {
+      if (status.didJustFinish) {
+        subscription.remove();
+        onFinish?.();
+      }
+    });
     void player.seekTo(0);
     player.play();
-    return player.isLoaded ? player.duration * 1000 : 0;
   }, []);
 }

@@ -51,10 +51,11 @@ export function ReactionFlyer({
 }: ReactionFlyerProps): React.JSX.Element {
   const effect = REACTION_EFFECTS[reactionId];
   const [phase, setPhase] = useState<'traveling' | 'impact'>('traveling');
-  // The impact effect stays on screen for at least its configured duration, or for however
-  // long the reaction's sound actually plays, whichever is longer — set once the sound starts,
-  // right before switching into the impact phase below.
-  const [impactDurationMs, setImpactDurationMs] = useState(effect.impactDurationMs);
+  const [impactAnimationDone, setImpactAnimationDone] = useState(false);
+  // Only sounds with a real asset need to be waited on — see useOptionalSound for why this
+  // is now tracked via the player's actual finish event instead of a guessed duration.
+  const [soundFinished, setSoundFinished] = useState(REACTION_SOUND_ASSETS[reactionId] === undefined);
+  const hasCompletedRef = useRef(false);
   const travelProgress = useRef(new Animated.Value(0)).current;
   const impactProgress = useRef(new Animated.Value(0)).current;
   const playImpactSound = useOptionalSound(REACTION_SOUND_ASSETS[reactionId]);
@@ -68,8 +69,7 @@ export function ReactionFlyer({
     });
     animation.start(({ finished }) => {
       if (finished) {
-        const soundDurationMs = playImpactSound();
-        setImpactDurationMs(Math.max(effect.impactDurationMs, soundDurationMs));
+        playImpactSound(() => setSoundFinished(true));
         setPhase('impact');
       }
     });
@@ -83,18 +83,28 @@ export function ReactionFlyer({
       return;
     }
     const animation = Animated.timing(impactProgress, {
-      duration: impactDurationMs,
+      duration: effect.impactDurationMs,
       easing: Easing.out(Easing.cubic),
       toValue: 1,
       useNativeDriver: true,
     });
     animation.start(({ finished }) => {
       if (finished) {
-        onComplete();
+        setImpactAnimationDone(true);
       }
     });
     return () => animation.stop();
-  }, [phase, impactDurationMs]);
+  }, [phase]);
+
+  // Only unmounts (and so only releases the sound player) once both the impact animation has
+  // played out AND the sound has genuinely finished — never before, so the sound is never cut
+  // off early regardless of how long the impact animation itself runs.
+  useEffect(() => {
+    if (impactAnimationDone && soundFinished && !hasCompletedRef.current) {
+      hasCompletedRef.current = true;
+      onComplete();
+    }
+  }, [impactAnimationDone, soundFinished, onComplete]);
 
   const deltaX = ((fromXPercent - toXPercent) / 100) * tableWidthPx;
   const deltaY = ((fromYPercent - toYPercent) / 100) * tableHeightPx;

@@ -27,12 +27,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { PlayingCard, SUIT_SYMBOLS } from '../src/components/PlayingCard';
-import {
-  CARD_SCALE as HAND_CARD_SCALE,
-  CARD_WIDTH as HAND_CARD_WIDTH,
-  DraggableHand,
-  computeFanOverlapPx,
-} from '../src/components/DraggableHand';
+import { DraggableHand } from '../src/components/DraggableHand';
 import { ThrownCard } from '../src/components/ThrownCard';
 import { ReactionFlyer } from '../src/components/ReactionFlyer';
 import { ProfileModal } from '../src/components/ProfileModal';
@@ -106,48 +101,42 @@ const OPPONENT_SEAT_LAYOUTS: Record<number, readonly SeatPosition[]> = {
 const ME_SEAT: SeatPosition = { x: 50, y: 92 };
 
 // The table fills the whole screen, letterboxed to this aspect ratio — same approach as
-// the dev-table-preview route this layout is ported from. Web keeps the original photo's
-// own 16:9 shape (unchanged). A typical phone's landscape viewport (after excluding system
-// bars) is considerably more elongated than that — as narrow as ~2.5:1 on some devices — so
-// staying locked to 16:9 there means most of the screen goes unused as letterboxing. Native
-// instead uses its own wider table image (poker-table-native.png, a stretched-middle/
-// untouched-rounded-ends variant of the same table so nothing looks distorted) at this
-// matching wider ratio, cutting that wasted margin down substantially across common Android
-// aspect ratios without fully eliminating it on any single device.
-const TABLE_ASPECT_RATIO = 16 / 9;
+// the dev-table-preview route this layout is ported from. A typical phone's landscape
+// viewport (after excluding system bars) is considerably more elongated than a standard
+// 16:9 shape — as narrow as ~2.5:1 on some devices — so this uses its own wider table image
+// (poker-table-native.png, a stretched-middle/untouched-rounded-ends variant of the table so
+// nothing looks distorted) at a matching wider ratio, cutting that wasted letterboxing margin
+// down substantially across common device aspect ratios without fully eliminating it on any
+// single one. Applied identically on web and native so the installed PWA matches the app.
 const NATIVE_TABLE_ASPECT_RATIO = 2.4;
-// Native only: a modest deliberate vertical-only stretch applied on top of the normal
-// contain-fit box below, so the table reads as a little taller/more vertically spacious
-// without widening it or touching the table image asset itself. Paired with resizeMode
-// "stretch" (native only, see TableWrap) so the image actually fills the taller box instead
-// of just adding empty padding above/below it. Clamped where it's applied so it can never
-// push the table's top edge above the visible screen.
+// A modest deliberate vertical-only stretch applied on top of the normal contain-fit box
+// below, so the table reads as a little taller/more vertically spacious without widening it
+// or touching the table image asset itself. Paired with resizeMode "stretch" (see TableWrap)
+// so the image actually fills the taller box instead of just adding empty padding above/below
+// it. Clamped where it's applied so it can never push the table's top edge above the visible
+// screen.
 const NATIVE_TABLE_VERTICAL_STRETCH = 1.12;
-// A bit more breathing room between hand cards on native than web's default fan spacing.
+// A bit more breathing room between hand cards than a tighter default fan spacing would give.
 const HAND_OVERLAP_MULTIPLIER_NATIVE = 1.2;
-// Small deliberate gap between the hand's bottom edge and the true screen edge on native —
-// enough to avoid looking pasted flush against the bezel, not enough to reintroduce the
-// large dead margin this was fixed to remove.
+// Small deliberate gap between the hand's bottom edge and the true screen edge — enough to
+// avoid looking pasted flush against the bezel, not enough to reintroduce a large dead margin.
 const HAND_BOTTOM_MARGIN_NATIVE_PX = 15;
 // Table/thrown/discard-pile cards are rendered at "played" size and visually scaled up —
 // scaling is centered on each card's own box, so none of the position/centering math below
 // needs to change to account for it.
 const TABLE_CARD_SCALE = 1.4;
-// How far the "You" name/avatar label sits to the left of your hand.
-const MY_LABEL_GAP_PX = 20;
 // Base (responsiveScale === 1) profile sizing — large, clearly-visible circular avatars with
-// consistent spacing to the name/turn indicator below them, matching every seat including the
-// "You" label. Scaled by responsiveScale below so it shrinks proportionally on a smaller table
-// instead of dominating it.
+// consistent spacing to the name/turn indicator below them, matching every seat. Scaled by
+// responsiveScale below so it shrinks proportionally on a smaller table instead of dominating
+// it, then bumped further by NATIVE_AVATAR_SIZE_MULTIPLIER since profiles read better large.
 const AVATAR_SIZE_PX = 85;
 const SEAT_LABEL_WIDTH_PX = 132;
-// Android landscape only: profiles read noticeably larger there than the web baseline above.
 const NATIVE_AVATAR_SIZE_MULTIPLIER = 1.4;
-// Android landscape only: the topmost seat row (e.g. the 5-opponent layout's dead-center-top
-// seat at y: 2) sits close enough to the table's own top edge that the now-larger avatar
-// visually overlaps it. Clamping every opponent seat's y to at least this percent nudges only
-// the seats that are already near the top down a little, leaving every other seat (and every
-// x position) exactly where it was.
+// The topmost seat row (e.g. the 5-opponent layout's dead-center-top seat at y: 2) sits close
+// enough to the table's own top edge that the larger avatar above visually overlaps it.
+// Clamping every opponent seat's y to at least this percent nudges only the seats that are
+// already near the top down a little, leaving every other seat (and every x position) exactly
+// where it was.
 const NATIVE_MIN_OPPONENT_SEAT_Y_PERCENT = 14;
 // The hand's fan is allowed to use this fraction of the felt's width before its overlap
 // starts tightening up — leaves a little breathing room on either side.
@@ -199,12 +188,11 @@ function rowPosition(index: number, total: number, tableWidthPx: number, gapPx: 
   return { x: 50 + offsetPercent, y: TABLE_CARD_ROW_Y_PERCENT };
 }
 
-// Web uses the wood-framed photo, "cover"-cropped since a browser tab is always at least
-// as wide as the table's own 16:9 art. Native uses a transparent-background render of the
-// same table (poker-table-native.png) with "stretch" instead — the box below is sized to
-// exactly match the image's own aspect ratio horizontally, then deliberately inflated a
-// little vertically (NATIVE_TABLE_VERTICAL_STRETCH), so "stretch" only ever distorts that
-// same small vertical amount rather than cropping or padding the table.
+// Same table render (poker-table-native.png, transparent background) and "stretch" resize on
+// every platform, so the installed web PWA looks identical to the native app — the box below
+// is sized to exactly match the image's own aspect ratio horizontally, then deliberately
+// inflated a little vertically (NATIVE_TABLE_VERTICAL_STRETCH), so "stretch" only ever
+// distorts that same small vertical amount rather than cropping or padding the table.
 function TableWrap({
   children,
   onLayout,
@@ -220,18 +208,13 @@ function TableWrap({
     <ImageBackground
       imageStyle={tableImageStyle}
       onLayout={onLayout}
-      // "stretch" (native) is what actually makes the deliberate vertical stretch above
+      // "stretch" is what actually makes the deliberate vertical stretch above
       // (renderedBoxHeight in game.tsx) visible — "contain" would just add empty padding
       // above/below the image inside the taller box instead of enlarging it. Since the box's
       // width is untouched and only its height is inflated, this only stretches vertically.
-      resizeMode={Platform.OS === 'web' ? 'cover' : 'stretch'}
-      source={
-        Platform.OS === 'web'
-          ? // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
-            require('../assets/poker-table.jpg')
-          : // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
-            require('../assets/poker-table-native.png')
-      }
+      resizeMode="stretch"
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+      source={require('../assets/poker-table-native.png')}
       style={style}
     >
       {children}
@@ -395,9 +378,6 @@ export default function GameTableScreen(): React.JSX.Element {
     const layout = OPPONENT_SEAT_LAYOUTS[opponents.length] ?? OPPONENT_SEAT_LAYOUTS[5];
     const seatIndex = layout !== undefined ? layout.length - 1 - index : index;
     const position = layout?.[seatIndex] ?? { x: 50, y: 10 };
-    if (Platform.OS === 'web') {
-      return position;
-    }
     return { x: position.x, y: Math.max(position.y, NATIVE_MIN_OPPONENT_SEAT_Y_PERCENT) };
   };
 
@@ -407,7 +387,7 @@ export default function GameTableScreen(): React.JSX.Element {
   // spans the full window so its background bleeds edge-to-edge behind the system bars.
   const availableWidth = winWidth - insets.left - insets.right;
   const availableHeight = winHeight - insets.top - insets.bottom;
-  const tableAspectRatio = Platform.OS === 'web' ? TABLE_ASPECT_RATIO : NATIVE_TABLE_ASPECT_RATIO;
+  const tableAspectRatio = NATIVE_TABLE_ASPECT_RATIO;
   let boxWidth = availableWidth;
   let boxHeight = boxWidth / tableAspectRatio;
   if (boxHeight > availableHeight) {
@@ -415,13 +395,13 @@ export default function GameTableScreen(): React.JSX.Element {
     boxWidth = boxHeight * tableAspectRatio;
   }
   // boxWidth stays exactly as computed above (no sideways stretch). boxHeight gets a modest
-  // vertical-only bump on native, capped so the table's top edge can never rise above the
-  // physical screen (insets.top + availableHeight is the same quantity tableTopPx's
-  // bottom-anchor below is measured from).
-  const renderedBoxHeight =
-    Platform.OS === 'web'
-      ? boxHeight
-      : Math.min(boxHeight * NATIVE_TABLE_VERTICAL_STRETCH, insets.top + availableHeight);
+  // vertical-only bump, capped so the table's top edge can never rise above the physical
+  // screen (insets.top + availableHeight is the same quantity tableTopPx's bottom-anchor
+  // below is measured from).
+  const renderedBoxHeight = Math.min(
+    boxHeight * NATIVE_TABLE_VERTICAL_STRETCH,
+    insets.top + availableHeight,
+  );
   // Card sizing scales down proportionally on a smaller table instead of holding a fixed
   // pixel size that dominates a small screen.
   const responsiveScale = Math.max(
@@ -432,12 +412,11 @@ export default function GameTableScreen(): React.JSX.Element {
   const tableCardTransformStyle = { transform: [{ scale: TABLE_CARD_SCALE * responsiveScale }] };
   // Large, clearly-visible circular avatars — sized relative to the table (like every other
   // seat/card measurement here) so they scale together with it instead of dominating a small
-  // table or looking tiny on a large one. Android landscape gets a further deliberate bump on
-  // top of the shared web baseline; the seat label and its text scale the same way so the
-  // username and TURN indicator stay aligned with the bigger avatar.
-  const nativeAvatarMultiplier = Platform.OS === 'web' ? 1 : NATIVE_AVATAR_SIZE_MULTIPLIER;
-  const avatarSizePx = AVATAR_SIZE_PX * responsiveScale * nativeAvatarMultiplier;
-  const seatLabelWidthPx = SEAT_LABEL_WIDTH_PX * responsiveScale * nativeAvatarMultiplier;
+  // table or looking tiny on a large one, plus a further deliberate bump; the seat label and
+  // its text scale the same way so the username and TURN indicator stay aligned with the
+  // bigger avatar.
+  const avatarSizePx = AVATAR_SIZE_PX * responsiveScale * NATIVE_AVATAR_SIZE_MULTIPLIER;
+  const seatLabelWidthPx = SEAT_LABEL_WIDTH_PX * responsiveScale * NATIVE_AVATAR_SIZE_MULTIPLIER;
   const avatarSizeStyle = { borderRadius: avatarSizePx / 2, height: avatarSizePx, width: avatarSizePx };
   const seatSizeStyle = {
     marginLeft: -seatLabelWidthPx / 2,
@@ -967,29 +946,10 @@ export default function GameTableScreen(): React.JSX.Element {
     void action().finally(() => router.replace('/'));
   }
 
-  // Mirrors the hand's own fan math (DraggableHand) so the "You" label sits just to the
-  // left of the hand no matter how wide the hand or the table is.
-  const handCount = visibleOwnCards.length;
   const handAvailableWidthPx = tableSize.width * HAND_WIDTH_BUDGET_FRACTION;
-  const handOverlapPx = computeFanOverlapPx(handCount, handAvailableWidthPx, responsiveScale);
-  const handRowWidthPx = handOverlapPx * Math.max(handCount - 1, 0);
-  const handVisualHalfWidthPx = (HAND_CARD_WIDTH / 2) * HAND_CARD_SCALE * responsiveScale;
-  // On a narrow table a big hand can still push the label past the left edge even with a
-  // tightened fan overlap — clamp so it stays on screen (overlapping the hand slightly in
-  // that extreme case) rather than disappearing off the side entirely.
-  const minLabelOffsetPx =
-    tableSize.width > 0 ? -(tableSize.width / 2) + seatLabelWidthPx / 2 + 6 : Number.NEGATIVE_INFINITY;
-  const myLabelOffsetPx = Math.max(
-    -(handRowWidthPx / 2) - handVisualHalfWidthPx - MY_LABEL_GAP_PX - seatLabelWidthPx,
-    minLabelOffsetPx,
-  );
-  // Web keeps the table vertically centered within the safe area. Native bottom-anchors it
-  // instead, so the table's own bottom edge touches the bottom of the safe area (the true
-  // screen edge, now that the status/nav bars are hidden).
-  const tableTopPx =
-    Platform.OS === 'web'
-      ? insets.top + (availableHeight - renderedBoxHeight) / 2
-      : insets.top + availableHeight - renderedBoxHeight;
+  // The table's own bottom edge touches the bottom of the safe area (the true screen edge,
+  // now that the status/nav bars are hidden).
+  const tableTopPx = insets.top + availableHeight - renderedBoxHeight;
   // The hand is anchored inside the table's own coordinate space (so its width/centering
   // still track the table), pulled up from the table's own bottom edge by a small deliberate
   // margin so it doesn't look pasted flush against it. Web's handWrap uses its own unrelated
@@ -1250,24 +1210,6 @@ export default function GameTableScreen(): React.JSX.Element {
           const seat = seatFor(player);
           const isTurn = player.id === gameState.currentPlayerId;
           const isOut = player.status === 'SPECTATING' || player.status === 'LEFT';
-          // While an Inaam is sweeping toward this player, or a "take all cards" transfer is
-          // sweeping to/from them, hold their displayed count back to what it was before the
-          // transfer until the cards actually arrive.
-          const displayedCardsRemaining = (() => {
-            if (inaamCardIdsInFlight !== null && inaamAnimation?.receiverId === player.id) {
-              return Math.max(0, player.cardsRemaining - inaamCardIdsInFlight.size);
-            }
-            if (transferAnimation !== null) {
-              if (transferAnimation.targetId === player.id) {
-                return player.cardsRemaining + transferAnimation.cardCount;
-              }
-              if (transferAnimation.requesterId === player.id) {
-                return Math.max(0, player.cardsRemaining - transferAnimation.cardCount);
-              }
-            }
-            return player.cardsRemaining;
-          })();
-          const fanCount = Math.max(1, Math.min(displayedCardsRemaining, 5));
           return (
             <Pressable
               accessibilityLabel={`${player.name}'s profile`}
@@ -1310,22 +1252,6 @@ export default function GameTableScreen(): React.JSX.Element {
                   {statusBadgeLabels[player.status as 'SPECTATING' | 'LEFT']}
                 </Text>
               )}
-              {/* Android landscape drops the face-down mini-card fan to keep the (now
-                  larger) profile icons uncluttered. The exact card count never shows on the
-                  table on either platform any more — it's in the profile modal instead. */}
-              {Platform.OS === 'web' && !isOut && displayedCardsRemaining > 0 && (
-                <View style={styles.seatCardFan}>
-                  {Array.from({ length: fanCount }).map((_, fanIndex) => (
-                    <PlayingCard
-                      faceDown
-                      key={fanIndex}
-                      rotateDeg={(fanIndex - (fanCount - 1) / 2) * 8}
-                      size="mini"
-                      style={[styles.fanCard, { marginLeft: fanIndex === 0 ? 0 : -18 }]}
-                    />
-                  ))}
-                </View>
-              )}
             </Pressable>
           );
         })}
@@ -1360,30 +1286,6 @@ export default function GameTableScreen(): React.JSX.Element {
             soundId={flash.soundId}
           />
         ))}
-
-        {myPlayer !== undefined && Platform.OS === 'web' && (
-          <View
-            style={[
-              styles.seat,
-              seatSizeStyle,
-              { left: '50%', marginLeft: myLabelOffsetPx, top: '80%', zIndex: 999 },
-            ]}
-          >
-            <View style={styles.avatarWrap}>
-              <View style={[styles.playerAvatar, avatarSizeStyle]}>
-                <Image
-                  resizeMode="cover"
-                  source={AVATAR_IMAGES[myPlayer.avatar]}
-                  style={styles.playerAvatarImage}
-                />
-              </View>
-              {funSoundFlashPlayerIds.has(myPlayer.id) && <AvatarFlash sizePx={avatarSizePx} />}
-            </View>
-            <Text numberOfLines={1} style={[styles.playerName, playerNameSizeStyle]}>
-              You ({myPlayer.name})
-            </Text>
-          </View>
-        )}
 
         <View pointerEvents="none" style={styles.centerPlayArea}>
           {frozenTrick === null &&
@@ -1630,11 +1532,7 @@ export default function GameTableScreen(): React.JSX.Element {
         <View
           style={[
             styles.handWrap,
-            Platform.OS !== 'web' && {
-              bottom: handBottomGapPx,
-              marginTop: 0,
-              top: undefined,
-            },
+            { bottom: handBottomGapPx, marginTop: 0, top: undefined },
           ]}
         >
           <DraggableHand
@@ -1643,7 +1541,7 @@ export default function GameTableScreen(): React.JSX.Element {
             cardScale={responsiveScale}
             cards={visibleOwnCards}
             onPlay={(cardId) => void playCard(cardId)}
-            overlapMultiplier={Platform.OS === 'web' ? 1 : HAND_OVERLAP_MULTIPLIER_NATIVE}
+            overlapMultiplier={HAND_OVERLAP_MULTIPLIER_NATIVE}
             suitSortSignal={suitSortSignal}
           />
         </View>
@@ -1795,9 +1693,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1.5,
-  },
-  fanCard: {
-    borderColor: '#5E1620',
   },
   handWrap: {
     left: 0,
@@ -2026,11 +1921,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'absolute',
     width: 224,
-  },
-  seatCardFan: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    marginTop: 6,
   },
   table: {
     alignItems: 'center',
