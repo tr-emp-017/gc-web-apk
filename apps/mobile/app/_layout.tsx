@@ -1,11 +1,14 @@
 import { Stack, useRouter } from 'expo-router';
-import { useEffect } from 'react';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, PermissionsAndroid, Platform, StyleSheet, View } from 'react-native';
 import { useRoomStore } from '../src/stores/roomStore';
+import { useAccountStore } from '../src/stores/accountStore';
+import { palette } from '../src/components/Screen';
 
 export default function RootLayout(): React.JSX.Element {
   const router = useRouter();
   const restoreSession = useRoomStore((state) => state.restoreSession);
+  const [bootDone, setBootDone] = useState(false);
 
   useEffect(() => {
     // Ask for the mic up front, on app open, instead of leaving the first prompt to
@@ -20,27 +23,64 @@ export default function RootLayout(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    // Only ever attempt this once, on app boot — never react to later state changes,
-    // otherwise navigating "back home" after a finished game immediately bounces back.
+    // Sequenced, not parallel: whether a room-session reconnect should even be attempted
+    // depends on an account existing at all — running both at once could have the account
+    // redirect to /account/setup land after the reconnect redirect (or the reverse), each
+    // stomping on the other's router.replace. Only ever runs once, on app boot.
     let cancelled = false;
-    void restoreSession().then((restored) => {
-      if (cancelled || !restored) {
+    async function boot(): Promise<void> {
+      const accountStatus = await useAccountStore.getState().bootstrap();
+      if (cancelled) {
         return;
       }
-      const { room, gameState } = useRoomStore.getState();
-      if (room === null) {
+      if (accountStatus === 'needsSetup') {
+        router.replace('/account/setup');
+        setBootDone(true);
         return;
       }
-      if (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER') {
-        router.replace('/game');
-      } else {
-        router.replace(`/room/${room.code}`);
+      const restored = await restoreSession();
+      if (cancelled) {
+        return;
       }
-    });
+      if (restored) {
+        const { room, gameState } = useRoomStore.getState();
+        if (room !== null) {
+          if (gameState?.status === 'PLAYING' || gameState?.status === 'GAME_OVER') {
+            router.replace('/game');
+          } else {
+            router.replace(`/room/${room.code}`);
+          }
+        }
+      }
+      setBootDone(true);
+    }
+    void boot();
     return () => {
       cancelled = true;
     };
   }, [restoreSession, router]);
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <>
+      <Stack screenOptions={{ headerShown: false }} />
+      {!bootDone && (
+        <View style={styles.bootOverlay}>
+          <ActivityIndicator color={palette.red} size="large" />
+        </View>
+      )}
+    </>
+  );
 }
+
+const styles = StyleSheet.create({
+  bootOverlay: {
+    alignItems: 'center',
+    backgroundColor: palette.paper,
+    bottom: 0,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+});

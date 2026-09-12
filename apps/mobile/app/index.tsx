@@ -1,8 +1,11 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Screen, palette } from '../src/components/Screen';
 
+import { Ionicons } from '@expo/vector-icons';
 import { PrimaryButton } from '../src/components/PrimaryButton';
 import { useRef } from 'react';
+import { useAccountStore } from '../src/stores/accountStore';
+import { AVATAR_IMAGES } from '../src/constants/avatarImages';
 import { useRoomStore } from '../src/stores/roomStore';
 import { useRouter } from 'expo-router';
 
@@ -17,6 +20,7 @@ const PREVIEW_UNLOCK_WINDOW_MS = 3000;
 export default function HomeScreen(): React.JSX.Element {
   const router = useRouter();
   const enterPreviewMode = useRoomStore((state) => state.enterPreviewMode);
+  const account = useAccountStore((state) => state.account);
   const titleTapCountRef = useRef(0);
   const titleTapWindowStartRef = useRef(0);
 
@@ -36,6 +40,21 @@ export default function HomeScreen(): React.JSX.Element {
 
   return (
     <Screen>
+      {account !== null && (
+        <Pressable
+          accessibilityLabel="Edit your profile"
+          accessibilityRole="button"
+          onPress={() => router.push('/account/edit')}
+          style={styles.profileChip}
+        >
+          <Image source={AVATAR_IMAGES[account.avatar]} style={styles.profileAvatar} />
+          <Text numberOfLines={1} style={styles.profileName}>
+            {account.displayName}
+          </Text>
+          <Ionicons color={palette.muted} name="chevron-forward" size={16} />
+        </Pressable>
+      )}
+
       <View style={styles.header}>
         <Text style={styles.kicker}>DELHI • NORTH INDIA</Text>
         <Text onPress={handleTitleTap} style={styles.title}>
@@ -108,6 +127,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1.5,
+  },
+  profileAvatar: {
+    borderRadius: 12,
+    height: 24,
+    width: 24,
+  },
+  profileChip: {
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    backgroundColor: palette.white,
+    borderColor: '#DED8CC',
+    borderRadius: 20,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  profileName: {
+    color: palette.ink,
+    fontSize: 13,
+    fontWeight: '700',
+    maxWidth: 120,
   },
   subtitle: {
     color: palette.muted,

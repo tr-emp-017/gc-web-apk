@@ -1,33 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
+import { PlayingAsCard } from '../../src/components/PlayingAsCard';
 import { Screen, palette } from '../../src/components/Screen';
 import { useRoomStore } from '../../src/stores/roomStore';
-import { AvatarPicker } from '../../src/components/AvatarPicker';
-import { generateRandomGamerName } from '../../src/utils/randomName';
-import { loadPlayerName, savePlayerName } from '../../src/utils/playerNameStorage';
-import type { AvatarId } from '@gadha-chor/shared-types';
+import { useAccountStore } from '../../src/stores/accountStore';
 
 export default function JoinRoomScreen(): React.JSX.Element {
   const router = useRouter();
   const joinRoom = useRoomStore((state) => state.joinRoom);
   const error = useRoomStore((state) => state.error);
-  const [name, setName] = useState('');
+  const account = useAccountStore((state) => state.account);
   const [code, setCode] = useState('GC-');
-  const [avatar, setAvatar] = useState<AvatarId>('beard-glasses');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Prefill with whatever name was remembered from last time on this device (see create.tsx
-  // for the same behavior); fall back to a random one for a first-time player.
-  useEffect(() => {
-    void loadPlayerName().then((stored) => setName(stored ?? generateRandomGamerName()));
-  }, []);
-
-  function updateName(nextName: string): void {
-    setName(nextName);
-    void savePlayerName(nextName);
-  }
 
   // Every room code the server generates is "GC-" followed by 4 digits, so keep that
   // prefix always present — the player only ever needs to type the digits.
@@ -38,8 +24,11 @@ export default function JoinRoomScreen(): React.JSX.Element {
   }
 
   async function handleJoin(): Promise<void> {
+    if (account === null) {
+      return;
+    }
     setIsSubmitting(true);
-    const joined = await joinRoom(code, name, avatar);
+    const joined = await joinRoom(code, account.displayName, account.avatar);
     setIsSubmitting(false);
     if (joined) {
       const room = useRoomStore.getState().room;
@@ -67,27 +56,11 @@ export default function JoinRoomScreen(): React.JSX.Element {
           style={styles.input}
           value={code}
         />
-        <AvatarPicker onChange={setAvatar} value={avatar} />
-        <Text style={[styles.label, styles.nameLabel]}>Your name</Text>
-        <View style={styles.nameRow}>
-          <TextInput
-            autoCapitalize="words"
-            autoCorrect={false}
-            onChangeText={updateName}
-            placeholder="e.g. Rahul"
-            placeholderTextColor="#9A958B"
-            style={[styles.input, styles.nameInput]}
-            value={name}
-          />
-          <Pressable
-            accessibilityLabel="Generate a random gamer name"
-            accessibilityRole="button"
-            onPress={() => updateName(generateRandomGamerName())}
-            style={styles.diceButton}
-          >
-            <Text style={styles.diceButtonText}>🎲</Text>
-          </Pressable>
-        </View>
+        {account !== null && (
+          <View style={styles.playingAsWrap}>
+            <PlayingAsCard account={account} />
+          </View>
+        )}
         {error !== null && <Text style={styles.error}>{error}</Text>}
       </View>
 
@@ -127,19 +100,6 @@ const styles = StyleSheet.create({
   form: {
     marginTop: 40,
   },
-  diceButton: {
-    alignItems: 'center',
-    backgroundColor: palette.white,
-    borderColor: '#DED8CC',
-    borderRadius: 14,
-    borderWidth: 1,
-    height: 56,
-    justifyContent: 'center',
-    width: 56,
-  },
-  diceButtonText: {
-    fontSize: 22,
-  },
   input: {
     backgroundColor: palette.white,
     borderColor: '#DED8CC',
@@ -156,15 +116,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
   },
-  nameInput: {
-    flex: 1,
-  },
-  nameLabel: {
+  playingAsWrap: {
     marginTop: 18,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    gap: 8,
   },
   title: {
     color: palette.ink,

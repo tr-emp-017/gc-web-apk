@@ -67,6 +67,17 @@ export const FUN_SOUND_OPTIONS = [
   'wooooaah',
   'ye-ladki-tum-bohut-bolti-ho-chapad-chapad',
   'yeah-boy',
+  'anime-ahh',
+  'is-ka-karan-narendar-modi',
+  'depression-indian',
+  'bade-harami-ho-beta',
+  'mka-ladle-meow-gop',
+  'ek-gand-pe-repta-mara-n-sarak-pe-hagta-firega',
+  'wow-kya-ladka-hai-very-handsome-boy',
+  'cid-le-mdc',
+  'khatam',
+  'ek-din-mar-jayega',
+  'ruko-jara',
 ] as const;
 export type FunSoundId = (typeof FUN_SOUND_OPTIONS)[number];
 
@@ -100,6 +111,17 @@ export const FUN_SOUND_SYMBOLS: Record<FunSoundId, string> = {
   wooooaah: '😲',
   'ye-ladki-tum-bohut-bolti-ho-chapad-chapad': '🗯️',
   'yeah-boy': '🙌',
+  'anime-ahh': '😱',
+  'is-ka-karan-narendar-modi': '📢',
+  'depression-indian': '😔',
+  'bade-harami-ho-beta': '😈',
+  'mka-ladle-meow-gop': '🐱',
+  'ek-gand-pe-repta-mara-n-sarak-pe-hagta-firega': '🤬',
+  'wow-kya-ladka-hai-very-handsome-boy': '😎',
+  'cid-le-mdc': '🕵️',
+  khatam: '🏁',
+  'ek-din-mar-jayega': '⚰️',
+  'ruko-jara': '🛑',
 };
 
 export type PublicPlayer = {

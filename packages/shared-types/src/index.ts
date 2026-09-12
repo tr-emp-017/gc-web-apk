@@ -18,3 +18,14 @@ export {
   REACTION_OPTIONS,
   REACTION_SYMBOLS,
 } from './socket.types.js';
+export type {
+  PlayerAccount,
+  CreateAccountRequest,
+  CreateAccountResponse,
+  UpdateAccountRequest,
+  RecoverAccountRequest,
+  RecoverAccountResponse,
+  RegenerateRecoveryTokenResponse,
+  UsernameAvailabilityResponse,
+  AccountApiError,
+} from './account.types.js';

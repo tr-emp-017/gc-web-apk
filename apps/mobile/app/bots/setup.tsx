@@ -1,15 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
+import { PlayingAsCard } from '../../src/components/PlayingAsCard';
 import { Screen, palette } from '../../src/components/Screen';
 import { useRoomStore } from '../../src/stores/roomStore';
-import { AvatarPicker } from '../../src/components/AvatarPicker';
-import { generateRandomGamerName } from '../../src/utils/randomName';
-import { loadPlayerName, savePlayerName } from '../../src/utils/playerNameStorage';
+import { useAccountStore } from '../../src/stores/accountStore';
 import { BOT_DIFFICULTIES } from '../../src/bots/difficulties';
 import { BOT_PLAYER_COUNTS, type BotDifficultyId, type BotPlayerCount } from '../../src/bots/types';
-import type { AvatarId } from '@gadha-chor/shared-types';
 
 const DEFAULT_PLAYER_COUNT: BotPlayerCount = 4;
 const DEFAULT_DIFFICULTY: BotDifficultyId = 'medium';
@@ -28,34 +26,24 @@ function randomSearchSeconds(): number {
 export default function BotSetupScreen(): React.JSX.Element {
   const router = useRouter();
   const startBotMatch = useRoomStore((state) => state.startBotMatch);
-  const [name, setName] = useState('');
-  const [avatar, setAvatar] = useState<AvatarId>('beard-glasses');
+  const account = useAccountStore((state) => state.account);
   const [playerCount, setPlayerCount] = useState<BotPlayerCount>(DEFAULT_PLAYER_COUNT);
   const [difficulty, setDifficulty] = useState<BotDifficultyId>(DEFAULT_DIFFICULTY);
   const [showCardCounts, setShowCardCounts] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
-    void loadPlayerName().then((stored) => setName(stored ?? generateRandomGamerName()));
-  }, []);
-
-  useEffect(() => {
-    if (countdown === null) {
+    if (countdown === null || account === null) {
       return;
     }
     if (countdown <= 0) {
-      startBotMatch(name, avatar, playerCount, difficulty, showCardCounts);
+      startBotMatch(account.displayName, account.avatar, playerCount, difficulty, showCardCounts);
       router.replace('/game');
       return;
     }
     const timer = setTimeout(() => setCountdown((current) => (current ?? 1) - 1), 1000);
     return () => clearTimeout(timer);
-  }, [countdown, name, avatar, playerCount, difficulty, showCardCounts, startBotMatch, router]);
-
-  function updateName(nextName: string): void {
-    setName(nextName);
-    void savePlayerName(nextName);
-  }
+  }, [countdown, account, playerCount, difficulty, showCardCounts, startBotMatch, router]);
 
   function handleStart(): void {
     setCountdown(randomSearchSeconds());
@@ -65,7 +53,7 @@ export default function BotSetupScreen(): React.JSX.Element {
     return (
       <Screen>
         <View style={styles.searchingWrap}>
-          <Text style={styles.eyebrow}>PRACTICE MATCH</Text>
+          <Text style={styles.eyebrow}>QUICK MATCH</Text>
           <Text style={styles.title}>Finding players to play with you…</Text>
           <Text style={styles.searchingCountdown}>{countdown}</Text>
           <Text style={styles.description}>Get ready — the table is filling up.</Text>
@@ -76,35 +64,14 @@ export default function BotSetupScreen(): React.JSX.Element {
 
   return (
     <Screen scroll>
-      <Text style={styles.eyebrow}>PRACTICE MATCH</Text>
-      <Text style={styles.title}>Play with bots</Text>
+      <Text style={styles.eyebrow}>QUICK MATCH</Text>
+      <Text style={styles.title}>Play a Match</Text>
       <Text style={styles.description}>
-        An instant, free match against computer players — no points at stake.
+        Jump straight into a live-style match and enjoy the game without waiting for other players.
       </Text>
 
       <View style={styles.form}>
-        <Text style={styles.label}>Your name</Text>
-        <View style={styles.nameRow}>
-          <TextInput
-            autoCapitalize="words"
-            autoCorrect={false}
-            onChangeText={updateName}
-            placeholder="e.g. Aslam"
-            placeholderTextColor="#9A958B"
-            style={[styles.input, styles.nameInput]}
-            value={name}
-          />
-          <Pressable
-            accessibilityLabel="Generate a random gamer name"
-            accessibilityRole="button"
-            onPress={() => updateName(generateRandomGamerName())}
-            style={styles.diceButton}
-          >
-            <Text style={styles.diceButtonText}>🎲</Text>
-          </Pressable>
-        </View>
-
-        <AvatarPicker onChange={setAvatar} value={avatar} />
+        {account !== null && <PlayingAsCard account={account} />}
 
         <Text style={styles.label}>Number of players</Text>
         <View style={styles.optionsRow}>
@@ -154,7 +121,7 @@ export default function BotSetupScreen(): React.JSX.Element {
         <View style={styles.toggleRow}>
           <View style={styles.toggleTextWrap}>
             <Text style={styles.label}>Show opponents&apos; card counts</Text>
-            <Text style={styles.hint}>Reveal how many cards each bot is holding.</Text>
+            <Text style={styles.hint}>See how many cards your opponents are holding.</Text>
           </View>
           <Switch onValueChange={setShowCardCounts} value={showCardCounts} />
         </View>
@@ -194,19 +161,6 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     marginTop: 12,
   },
-  diceButton: {
-    alignItems: 'center',
-    backgroundColor: palette.white,
-    borderColor: '#DED8CC',
-    borderRadius: 14,
-    borderWidth: 1,
-    height: 56,
-    justifyContent: 'center',
-    width: 56,
-  },
-  diceButtonText: {
-    fontSize: 22,
-  },
   difficultyEmoji: {
     fontSize: 26,
     marginRight: 12,
@@ -244,6 +198,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   form: {
+    gap: 20,
     marginTop: 32,
   },
   hint: {
@@ -251,29 +206,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  input: {
-    backgroundColor: palette.white,
-    borderColor: '#DED8CC',
-    borderRadius: 14,
-    borderWidth: 1,
-    color: palette.ink,
-    fontSize: 17,
-    minHeight: 56,
-    paddingHorizontal: 16,
-  },
   label: {
     color: palette.ink,
     fontSize: 14,
     fontWeight: '700',
-    marginBottom: 10,
-    marginTop: 24,
-  },
-  nameInput: {
-    flex: 1,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    gap: 8,
   },
   optionSelected: {
     backgroundColor: '#F5D8A4',
@@ -308,7 +244,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 24,
   },
   toggleTextWrap: {
     flex: 1,

@@ -40,6 +40,17 @@ export const FUN_SOUND_EFFECTS: Record<FunSoundId, FunSoundEffectConfig> = {
   wooooaah: { flashDurationMs: 1500 },
   'ye-ladki-tum-bohut-bolti-ho-chapad-chapad': { flashDurationMs: 2200 },
   'yeah-boy': { flashDurationMs: 1500 },
+  'anime-ahh': { flashDurationMs: 1500 },
+  'is-ka-karan-narendar-modi': { flashDurationMs: 2200 },
+  'depression-indian': { flashDurationMs: 2200 },
+  'bade-harami-ho-beta': { flashDurationMs: 2200 },
+  'mka-ladle-meow-gop': { flashDurationMs: 2200 },
+  'ek-gand-pe-repta-mara-n-sarak-pe-hagta-firega': { flashDurationMs: 2200 },
+  'wow-kya-ladka-hai-very-handsome-boy': { flashDurationMs: 2200 },
+  'cid-le-mdc': { flashDurationMs: 2200 },
+  khatam: { flashDurationMs: 2200 },
+  'ek-din-mar-jayega': { flashDurationMs: 2200 },
+  'ruko-jara': { flashDurationMs: 2200 },
 };
 
 // Every sound below already has its file at apps/mobile/assets/sounds/<id>.mp3. Drop a new
@@ -104,4 +115,26 @@ export const FUN_SOUND_ASSETS: Partial<Record<FunSoundId, number>> = {
   'ye-ladki-tum-bohut-bolti-ho-chapad-chapad': require('../../assets/sounds/ye-ladki-tum-bohut-bolti-ho-chapad-chapad.mp3'),
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
   'yeah-boy': require('../../assets/sounds/yeah-boy.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'anime-ahh': require('../../assets/sounds/anime-ahh.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'is-ka-karan-narendar-modi': require('../../assets/sounds/is-ka-karan-narendar-modi.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'depression-indian': require('../../assets/sounds/depression-indian.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'bade-harami-ho-beta': require('../../assets/sounds/bade-harami-ho-beta.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'mka-ladle-meow-gop': require('../../assets/sounds/mka-ladle-meow-gop.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'ek-gand-pe-repta-mara-n-sarak-pe-hagta-firega': require('../../assets/sounds/ek-gand-pe-repta-mara-n-sarak-pe-hagta-firega.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'wow-kya-ladka-hai-very-handsome-boy': require('../../assets/sounds/wow-kya-ladka-hai-very-handsome-boy.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'cid-le-mdc': require('../../assets/sounds/cid-le-mdc.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  khatam: require('../../assets/sounds/khatam.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'ek-din-mar-jayega': require('../../assets/sounds/ek-din-mar-jayega.mp3'),
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- static asset require
+  'ruko-jara': require('../../assets/sounds/ruko-jara.mp3'),
 };
