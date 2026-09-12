@@ -38,7 +38,7 @@ export default function HomeScreen(): React.JSX.Element {
   }
 
   return (
-    <Screen>
+    <Screen scroll>
       <View style={styles.topRow}>
         {account !== null && (
           <Pressable
@@ -148,8 +148,6 @@ const styles = StyleSheet.create({
   },
   imageWrap: {
     alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
     marginTop: 24,
   },
   kicker: {
@@ -239,10 +237,8 @@ const styles = StyleSheet.create({
   smallIcon: {
     aspectRatio: 1,
     borderRadius: 28,
-    height: '100%',
-    maxHeight: 260,
-    maxWidth: 260,
-    width: '100%',
+    height: 260,
+    width: 260,
   },
   title: {
     color: palette.ink,
