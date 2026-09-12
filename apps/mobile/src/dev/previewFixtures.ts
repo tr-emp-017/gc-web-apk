@@ -61,6 +61,7 @@ export function createPreviewRoom(): RoomSummary {
     code: PREVIEW_ROOM_CODE,
     entryPoints: 50,
     hostPlayerId: PREVIEW_PLAYER_ID,
+    isPublic: false,
     players: buildPlayers(),
     pool: 300,
     showCardCounts: true,

@@ -2,7 +2,10 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   AVATAR_OPTIONS,
   type AvatarId,
+  type BotPlayerIdentity,
   type CreateAccountResponse,
+  type LeaderboardEntry,
+  type MatchResult,
   type PlayerAccount,
   type RecoverAccountResponse,
 } from '@gadha-chor/shared-types';
@@ -13,6 +16,8 @@ import type {
   PlayerAccountRepository,
   ProfilePatch,
 } from './PlayerAccountRepository.js';
+
+const DEFAULT_LEADERBOARD_SIZE = 20;
 
 // Crockford base32 — no I/L/O/U, so a handwritten transcription can't be confused between
 // letters and digits. Encoding random bytes modulo 32 is unbiased because 256 is an exact
@@ -50,6 +55,17 @@ function generateDeviceToken(): string {
 // secret, which doesn't apply).
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
+}
+
+function toLeaderboardEntry(record: PlayerAccountRecord): LeaderboardEntry {
+  return {
+    playerId: record.playerId,
+    displayName: record.displayName,
+    avatar: record.avatar,
+    gamesPlayed: record.gamesPlayed,
+    wins: record.wins,
+    losses: record.losses,
+  };
 }
 
 function toPublicAccount(record: PlayerAccountRecord): PlayerAccount {
@@ -187,5 +203,46 @@ export class PlayerAccountService {
     }
     const existing = await this.repository.findByUsername(username);
     return existing === undefined;
+  }
+
+  // Bot accounts are real rows (is_bot: true), so they rank here exactly like real players —
+  // no separate merge step needed.
+  async getLeaderboard(limit = DEFAULT_LEADERBOARD_SIZE): Promise<readonly LeaderboardEntry[]> {
+    const players = await this.repository.listTopPlayers(limit);
+    return players.map(toLeaderboardEntry);
+  }
+
+  // Seats `count` bot accounts as opponents for a "Play with Bots" match — real, persisted
+  // accounts, so their stats can update after the match exactly like a real player's (see
+  // recordMatchResult).
+  async listBotPlayers(count: number): Promise<readonly BotPlayerIdentity[]> {
+    const bots = await this.repository.listBotAccounts(count);
+    return bots.map((record) => ({
+      playerId: record.playerId,
+      displayName: record.displayName,
+      avatar: record.avatar,
+    }));
+  }
+
+  // Records the outcome of a match for the caller's own account, and — if any bot accounts
+  // were seated in it — for those too. Only ever touches accounts truly flagged is_bot: true;
+  // any id in botResults that doesn't resolve to one is silently ignored, so this endpoint can
+  // never be used to tamper with another real player's stats no matter what a client sends.
+  async recordMatchResult(
+    deviceToken: string,
+    ownResult: MatchResult,
+    botResults: readonly { readonly playerId: string; readonly result: MatchResult }[] = [],
+  ): Promise<void> {
+    const owner = await this.repository.findByDeviceTokenHash(hashToken(deviceToken));
+    if (owner === undefined) {
+      throw new InvalidCredentialError();
+    }
+    await this.repository.incrementStats(owner.playerId, ownResult === 'WIN');
+    for (const entry of botResults) {
+      const candidate = await this.repository.findById(entry.playerId);
+      if (candidate?.isBot === true) {
+        await this.repository.incrementStats(candidate.playerId, entry.result === 'WIN');
+      }
+    }
   }
 }

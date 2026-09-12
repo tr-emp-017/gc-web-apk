@@ -35,6 +35,7 @@ export class InMemoryPlayerAccountRepository implements PlayerAccountRepository 
       losses: 0,
       deviceTokenHash: record.deviceTokenHash,
       recoveryTokenHash: record.recoveryTokenHash,
+      isBot: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -80,9 +81,47 @@ export class InMemoryPlayerAccountRepository implements PlayerAccountRepository 
   async findByRecoveryTokenHash(
     recoveryTokenHash: string,
   ): Promise<PlayerAccountRecord | undefined> {
-    return [...this.byId.values()].find(
-      (record) => record.recoveryTokenHash === recoveryTokenHash,
-    );
+    return [...this.byId.values()].find((record) => record.recoveryTokenHash === recoveryTokenHash);
+  }
+
+  async listTopPlayers(limit: number): Promise<readonly PlayerAccountRecord[]> {
+    return [...this.byId.values()]
+      .sort((a, b) => {
+        if (b.wins !== a.wins) {
+          return b.wins - a.wins;
+        }
+        if (b.gamesPlayed !== a.gamesPlayed) {
+          return b.gamesPlayed - a.gamesPlayed;
+        }
+        return a.createdAt.getTime() - b.createdAt.getTime();
+      })
+      .slice(0, limit);
+  }
+
+  async listBotAccounts(count: number): Promise<readonly PlayerAccountRecord[]> {
+    const bots = [...this.byId.values()].filter((record) => record.isBot);
+    return bots.sort(() => Math.random() - 0.5).slice(0, count);
+  }
+
+  async incrementStats(playerId: string, isWin: boolean): Promise<void> {
+    const existing = this.byId.get(playerId);
+    if (existing === undefined) {
+      throw new Error('Account was not found.');
+    }
+    this.byId.set(playerId, {
+      ...existing,
+      gamesPlayed: existing.gamesPlayed + 1,
+      wins: existing.wins + (isWin ? 1 : 0),
+      losses: existing.losses + (isWin ? 0 : 1),
+      updatedAt: new Date(),
+    });
+  }
+
+  // Test-only helper — production code never creates a bot account through this repository
+  // (they're seeded directly in Postgres by scripts/seedBotAccounts.ts); this just lets
+  // PlayerAccountService's tests set up an isBot: true row to exercise against.
+  seedBotAccountForTest(record: PlayerAccountRecord): void {
+    this.byId.set(record.playerId, record);
   }
 
   async rotateDeviceToken(

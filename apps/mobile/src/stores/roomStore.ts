@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type {
   ActionResponse,
   ClientToServerEvents,
+  RoomListing,
   RoomResponse,
   RoomSummary,
   ServerToClientEvents,
@@ -21,7 +22,10 @@ import {
 } from '../dev/previewFixtures';
 import { BOT_MATCH_HUMAN_ID, createBotMatch, type BotMatch } from '../bots/botMatch';
 import { pickBotIdentities } from '../bots/botIdentities';
+import { fetchServerBotIdentities } from '../bots/fetchServerBotIdentities';
+import { reportBotMatchResult } from '../bots/reportBotMatchResult';
 import type { BotDifficultyId, BotPlayerCount } from '../bots/types';
+import { useAccountStore } from './accountStore';
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -72,6 +76,9 @@ type RoomStore = {
   readonly transferResolution: TransferResolution | null;
   readonly lastInaam: InaamEvent | null;
   readonly lastFunSound: FunSoundPlayed | null;
+  // Kept live by the 'rooms:updated' broadcast for as long as a socket stays connected — see
+  // rooms.tsx, which reads this reactively instead of holding its own copy.
+  readonly roomListings: readonly RoomListing[];
   readonly previewMode: boolean;
   readonly botMode: boolean;
   readonly botMatch: BotMatch | null;
@@ -89,7 +96,7 @@ type RoomStore = {
     playerCount: BotPlayerCount,
     difficulty: BotDifficultyId,
     showCardCounts: boolean,
-  ) => void;
+  ) => Promise<void>;
   connect: () => GameSocket;
   clearError: () => void;
   clearLastCompletedChaal: () => void;
@@ -100,8 +107,21 @@ type RoomStore = {
     avatar: AvatarId,
     entryPoints: number,
     showCardCounts: boolean,
+    isPublic?: boolean,
   ) => Promise<boolean>;
   joinRoom: (code: string, name: string, avatar: AvatarId) => Promise<boolean>;
+  // "Play a Match" → real players: auto-matches into an open public room targeting the same
+  // playerCount, or creates one — see RoomManager.quickMatch. Lands the store in the exact same
+  // shape createRoom/joinRoom do, so the existing [code].tsx lobby renders it with no changes.
+  quickMatch: (
+    name: string,
+    avatar: AvatarId,
+    playerCount: number,
+    showCardCounts: boolean,
+  ) => Promise<boolean>;
+  // One-shot snapshot for the Rooms browser — not persisted in the store, the screen holds its
+  // own local list.
+  listRooms: () => Promise<readonly RoomListing[]>;
   setReady: (ready: boolean) => Promise<boolean>;
   startGame: () => Promise<boolean>;
   playCard: (cardId: string) => Promise<boolean>;
@@ -120,6 +140,9 @@ type RoomStore = {
 };
 
 const serverUrl = process.env.EXPO_PUBLIC_SERVER_URL ?? 'http://localhost:3000';
+// Same fixed placeholder entry-points value room/create.tsx uses — a quick-match room is a
+// real room with the same economics, nothing new to invent here.
+const QUICK_MATCH_ENTRY_POINTS = 100;
 
 function responseError(response: RoomResponse | ActionResponse): string | null {
   return response.ok ? null : response.error;
@@ -138,6 +161,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   transferResolution: null,
   lastInaam: null,
   lastFunSound: null,
+  roomListings: [],
   previewMode: false,
   botMode: false,
   botMatch: null,
@@ -162,13 +186,26 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   // touch the real wallet/entry-points economy. Every mutating action below short-circuits
   // into calls on the BotMatch instance whenever botMode is true, the same way previewMode
   // short-circuits into a local simulation above.
-  startBotMatch: (name, avatar, playerCount, difficulty, showCardCounts) => {
+  startBotMatch: async (name, avatar, playerCount, difficulty, showCardCounts) => {
     get().botMatch?.destroy();
     const trimmedName = name.trim().slice(0, 24) || 'You';
     const human = { avatar, id: BOT_MATCH_HUMAN_ID, name: trimmedName };
-    const bots = pickBotIdentities(playerCount - 1);
+    const neededBotCount = playerCount - 1;
+    // Prefer real, persisted bot accounts (so their stats evolve like a real player's) — but
+    // bot mode is designed to need zero server connectivity, so any failure here just falls
+    // back to the local made-up pool, same as it always has.
+    const serverBots = await fetchServerBotIdentities(neededBotCount);
+    const bots = serverBots?.identities ?? pickBotIdentities(neededBotCount);
+    const serverBotIds = serverBots?.serverBotIds ?? new Set<string>();
     const match = createBotMatch(human, bots, difficulty, {
       onCompletedChaal: (event) => set({ lastCompletedChaal: event }),
+      onGameOver: (gadhaChorId) => {
+        void reportBotMatchResult(
+          gadhaChorId,
+          useAccountStore.getState().deviceToken,
+          serverBotIds,
+        );
+      },
       onGameState: (gameState) => set({ gameState }),
       onInaam: (event) => set({ lastInaam: event }),
       onIncomingTransferRequest: (event) => set({ incomingTransferRequest: event }),
@@ -189,6 +226,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         code: 'BOTS',
         entryPoints: 0,
         hostPlayerId: BOT_MATCH_HUMAN_ID,
+        isPublic: false,
         players: initialState.players,
         showCardCounts,
         status: 'PLAYING',
@@ -213,6 +251,9 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     socket.on('room:updated', (room) =>
       set({ gameState: room.status === 'LOBBY' ? null : get().gameState, room }),
     );
+    // Live-updates the Rooms browser (see rooms.tsx) for as long as this socket stays
+    // connected — no manual refresh needed while the screen is open.
+    socket.on('rooms:updated', (rooms) => set({ roomListings: rooms }));
     socket.on('game:started', (gameState) => set({ gameState }));
     socket.on('game:state', (gameState) => set({ gameState }));
     socket.on('game:over', ({ state }) => set({ gameState: state }));
@@ -280,26 +321,69 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   clearLastCompletedChaal: () => set({ lastCompletedChaal: null }),
   clearLastInaam: () => set({ lastInaam: null }),
   clearTransferResolution: () => set({ transferResolution: null }),
-  createRoom: (name, avatar, entryPoints, showCardCounts) => {
+  createRoom: (name, avatar, entryPoints, showCardCounts, isPublic = false) => {
     const socket = get().connect();
     return new Promise((resolve) => {
-      socket.emit('room:create', { name, avatar, entryPoints, showCardCounts }, (response) => {
-        const error = responseError(response);
-        if (error !== null) {
-          set({ error });
-          resolve(false);
-          return;
-        }
-        if (response.ok) {
-          saveSession({ code: response.room.code, playerId: response.playerId });
-          set({
-            room: response.room,
-            playerId: response.playerId,
-            walletBalance: response.walletBalance,
-            error: null,
-          });
-          resolve(true);
-        }
+      socket.emit(
+        'room:create',
+        { name, avatar, entryPoints, showCardCounts, isPublic },
+        (response) => {
+          const error = responseError(response);
+          if (error !== null) {
+            set({ error });
+            resolve(false);
+            return;
+          }
+          if (response.ok) {
+            saveSession({ code: response.room.code, playerId: response.playerId });
+            set({
+              room: response.room,
+              playerId: response.playerId,
+              walletBalance: response.walletBalance,
+              error: null,
+            });
+            resolve(true);
+          }
+        },
+      );
+    });
+  },
+  quickMatch: (name, avatar, playerCount, showCardCounts) => {
+    const socket = get().connect();
+    return new Promise((resolve) => {
+      socket.emit(
+        'room:quickMatch',
+        { name, avatar, playerCount, entryPoints: QUICK_MATCH_ENTRY_POINTS, showCardCounts },
+        (response) => {
+          const error = responseError(response);
+          if (error !== null) {
+            set({ error });
+            resolve(false);
+            return;
+          }
+          if (response.ok) {
+            saveSession({ code: response.room.code, playerId: response.playerId });
+            set({
+              room: response.room,
+              playerId: response.playerId,
+              walletBalance: response.walletBalance,
+              error: null,
+            });
+            resolve(true);
+          }
+        },
+      );
+    });
+  },
+  listRooms: () => {
+    const socket = get().connect();
+    return new Promise((resolve) => {
+      socket.emit('room:list', (response) => {
+        const rooms = response.ok ? response.rooms : [];
+        // Populates the same field the live 'rooms:updated' broadcast keeps current — this is
+        // just how that field gets its first value before any broadcast has arrived yet.
+        set({ roomListings: rooms });
+        resolve(rooms);
       });
     });
   },
@@ -647,19 +731,19 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       });
     });
   },
-  playAgain: () => {
+  playAgain: async () => {
     if (get().previewMode) {
       // There's no real lobby to return to in preview mode — just regenerate a fresh mock
       // match in place, same as tapping the dev entry point again.
       get().enterPreviewMode();
-      return Promise.resolve(true);
+      return true;
     }
     if (get().botMode) {
       // No real lobby here either — rebuild a fresh match with the same seat count/name/
       // avatar/difficulty the human picked on the setup screen.
       const settings = get().botMatchSettings;
       if (settings !== null) {
-        get().startBotMatch(
+        await get().startBotMatch(
           settings.name,
           settings.avatar,
           settings.playerCount,
@@ -667,7 +751,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
           settings.showCardCounts,
         );
       }
-      return Promise.resolve(true);
+      return true;
     }
     const socket = get().connect();
     return new Promise((resolve) => {

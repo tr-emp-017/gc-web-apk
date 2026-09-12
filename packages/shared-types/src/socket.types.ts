@@ -161,6 +161,24 @@ export type RoomSummary = {
   readonly entryPoints: number;
   readonly pool?: number | undefined;
   readonly showCardCounts: boolean;
+  readonly isPublic: boolean;
+  // Only set on a quick-match room (see room:quickMatch) — the exact headcount it auto-starts
+  // at. Undefined for a manually-created room, which always starts via the host's game:start
+  // instead, regardless of its isPublic value.
+  readonly targetPlayerCount?: number | undefined;
+};
+
+// One row in the "Rooms" browser (see room:list) — deliberately lighter than RoomSummary (no
+// per-player roster) since this is shown to people who aren't in the room yet. `code` is only
+// ever present when isPublic is true — that presence/absence *is* the privacy boundary for a
+// private room, never send a private room's code here.
+export type RoomListing = {
+  readonly isPublic: boolean;
+  readonly code?: string | undefined;
+  readonly hostName: string;
+  readonly hostAvatar: AvatarId;
+  readonly playerCount: number;
+  readonly targetPlayerCount?: number | undefined;
 };
 
 export type ClientToServerEvents = {
@@ -188,12 +206,35 @@ export type ClientToServerEvents = {
       readonly avatar: AvatarId;
       readonly entryPoints: number;
       readonly showCardCounts?: boolean | undefined;
+      readonly isPublic?: boolean | undefined;
     },
     callback: (response: RoomResponse) => void,
   ) => void;
   'room:join': (
     payload: { readonly code: string; readonly name: string; readonly avatar: AvatarId },
     callback: (response: RoomResponse) => void,
+  ) => void;
+  // Auto-matches into an open public room targeting the same playerCount (joining an existing
+  // one over creating a new one whenever possible), and auto-starts the match the instant that
+  // many players have joined — no host, no manual ready-up, no manual "start" action at all.
+  'room:quickMatch': (
+    payload: {
+      readonly name: string;
+      readonly avatar: AvatarId;
+      readonly playerCount: number;
+      readonly entryPoints: number;
+      readonly showCardCounts?: boolean | undefined;
+    },
+    callback: (response: RoomResponse) => void,
+  ) => void;
+  // A one-shot snapshot of every currently open (LOBBY) room, public and private, for the
+  // Rooms browser — not a live subscription.
+  'room:list': (
+    callback: (
+      response:
+        | { readonly ok: true; readonly rooms: readonly RoomListing[] }
+        | { readonly ok: false; readonly error: string },
+    ) => void,
   ) => void;
   'room:leave': (callback: (response: ActionResponse) => void) => void;
   'room:kick': (
@@ -262,6 +303,10 @@ export type ServerToClientEvents = {
     };
   }) => void;
   'room:updated': (room: RoomSummary) => void;
+  // Broadcast to every connected client (not just those in a given room) whenever any room's
+  // listed-ness/headcount could have changed — created, joined, left, started, finished, or
+  // expired — so an open Rooms browser updates live with no manual refresh.
+  'rooms:updated': (rooms: readonly RoomListing[]) => void;
   'room:kicked': () => void;
   'game:started': (state: PublicGameState) => void;
   'game:state': (state: PublicGameState) => void;

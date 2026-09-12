@@ -13,6 +13,11 @@ export type PlayerAccountRecord = {
   readonly losses: number;
   readonly deviceTokenHash: string;
   readonly recoveryTokenHash: string;
+  // A seeded opponent account for "Play with Bots" — no one holds its device/recovery token.
+  // Only ever set by the bot-account seed script, never by create(). Gates incrementStats calls
+  // targeting an id supplied by a client (see PlayerAccountService.recordMatchResult) so a
+  // match-result report can never touch a real player's stats.
+  readonly isBot: boolean;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -54,4 +59,16 @@ export interface PlayerAccountRepository {
 
   rotateDeviceToken(playerId: string, newDeviceTokenHash: string): Promise<PlayerAccountRecord>;
   rotateRecoveryToken(playerId: string, newRecoveryTokenHash: string): Promise<void>;
+
+  // Ranked by wins desc, then gamesPlayed desc, then createdAt asc (earlier accounts break
+  // ties) — bot accounts are real rows too, so they rank alongside real players with no
+  // special-casing needed here.
+  listTopPlayers(limit: number): Promise<readonly PlayerAccountRecord[]>;
+
+  // A random sample of bot accounts to seat as opponents in a bot match.
+  listBotAccounts(count: number): Promise<readonly PlayerAccountRecord[]>;
+
+  // Bumps gamesPlayed by 1 and wins/losses by 1 depending on isWin — the only way stats are
+  // ever mutated, by design (see the "no stats writes" note on the wider account module).
+  incrementStats(playerId: string, isWin: boolean): Promise<void>;
 }

@@ -59,3 +59,44 @@ export type UsernameAvailabilityResponse = {
 export type AccountApiError = {
   readonly error: string;
 };
+
+// A single ranked row — deliberately excludes username (not needed to display a ranking) so
+// this never leaks anything beyond what every player's opponents already see in-game.
+export type LeaderboardEntry = {
+  readonly playerId: string;
+  readonly displayName: string;
+  readonly avatar: AvatarId;
+  readonly gamesPlayed: number;
+  readonly wins: number;
+  readonly losses: number;
+};
+
+export type LeaderboardResponse = {
+  readonly entries: readonly LeaderboardEntry[];
+};
+
+export type MatchResult = 'WIN' | 'LOSS';
+
+// A bot opponent seated from a real, persisted account (see PlayerAccountService.listBotPlayers)
+// rather than a made-up local name — its stats update after a match exactly like a real
+// player's, so it behaves indistinguishably from one everywhere else in the system (the
+// leaderboard, future matchmaking, etc).
+export type BotPlayerIdentity = {
+  readonly playerId: string;
+  readonly displayName: string;
+  readonly avatar: AvatarId;
+};
+
+export type BotPlayersResponse = {
+  readonly bots: readonly BotPlayerIdentity[];
+};
+
+export type RecordMatchResultRequest = {
+  // The caller's own result, attributed to whichever account the bearer device token belongs
+  // to.
+  readonly result: MatchResult;
+  // Any bot accounts (from BotPlayerIdentity) that were also seated in this match — the server
+  // only ever applies these to accounts actually flagged as bots, silently ignoring anything
+  // else, so this can never be used to tamper with another real player's stats.
+  readonly botResults?: readonly { readonly playerId: string; readonly result: MatchResult }[];
+};

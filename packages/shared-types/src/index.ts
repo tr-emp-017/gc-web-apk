@@ -6,6 +6,7 @@ export type {
   ClientToServerEvents,
   PublicGameState,
   PublicPlayer,
+  RoomListing,
   RoomResponse,
   RoomSummary,
   ServerToClientEvents,
@@ -28,4 +29,10 @@ export type {
   RegenerateRecoveryTokenResponse,
   UsernameAvailabilityResponse,
   AccountApiError,
+  LeaderboardEntry,
+  LeaderboardResponse,
+  MatchResult,
+  BotPlayerIdentity,
+  BotPlayersResponse,
+  RecordMatchResultRequest,
 } from './account.types.js';

@@ -53,6 +53,10 @@ export type BotMatchHandlers = {
   readonly onInaam: (event: InaamEventPayload) => void;
   readonly onIncomingTransferRequest: (event: IncomingTransferRequestEvent) => void;
   readonly onTransferResolution: (event: TransferResolutionEvent) => void;
+  // Fires exactly once, the moment the match reaches GAME_OVER — lets the caller report the
+  // result (human + any real bot accounts seated) to the account API without re-deriving the
+  // GAME_OVER transition itself from a stream of onGameState calls.
+  readonly onGameOver: (gadhaChorId: string | undefined) => void;
 };
 
 type PendingTransfer = { readonly requesterId: string; readonly targetId: string };
@@ -73,6 +77,7 @@ export class BotMatch {
   private pendingTransfer: PendingTransfer | null = null;
   private botTurnTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
+  private gameOverReported = false;
 
   constructor(
     human: BotIdentity,
@@ -248,7 +253,9 @@ export class BotMatch {
     }
 
     const previous = this.engine.getState();
-    const activePlayerCount = previous.players.filter((player) => player.status === 'ACTIVE').length;
+    const activePlayerCount = previous.players.filter(
+      (player) => player.status === 'ACTIVE',
+    ).length;
     if (activePlayerCount < 3) {
       this.handlers.onTransferResolution({
         accepted: false,
@@ -290,13 +297,16 @@ export class BotMatch {
       return;
     }
     const botId = state.currentPlayerId;
-    this.botTurnTimer = setTimeout(() => {
-      this.botTurnTimer = null;
-      if (this.destroyed) {
-        return;
-      }
-      this.runBotTurn(botId);
-    }, randomDelayMs(MIN_THINK_DELAY_MS, MAX_THINK_DELAY_MS));
+    this.botTurnTimer = setTimeout(
+      () => {
+        this.botTurnTimer = null;
+        if (this.destroyed) {
+          return;
+        }
+        this.runBotTurn(botId);
+      },
+      randomDelayMs(MIN_THINK_DELAY_MS, MAX_THINK_DELAY_MS),
+    );
   }
 
   private runBotTurn(botId: string): void {
@@ -334,7 +344,12 @@ export class BotMatch {
   }
 
   private emitState(): void {
-    this.handlers.onGameState(this.buildPublicState());
+    const state = this.buildPublicState();
+    this.handlers.onGameState(state);
+    if (!this.gameOverReported && state.status === 'GAME_OVER') {
+      this.gameOverReported = true;
+      this.handlers.onGameOver(state.gadhaChorId);
+    }
   }
 
   private buildPublicState(): PublicGameState {

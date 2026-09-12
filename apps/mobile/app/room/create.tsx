@@ -6,6 +6,7 @@ import { PlayingAsCard } from '../../src/components/PlayingAsCard';
 import { Screen, palette } from '../../src/components/Screen';
 import { useRoomStore } from '../../src/stores/roomStore';
 import { useAccountStore } from '../../src/stores/accountStore';
+import { goBackOrHome } from '../../src/utils/goBackOrHome';
 
 // The entry-points UI is hidden for now (to come back later) — the server still requires a
 // positive value to create a room, so every room is created with this fixed placeholder.
@@ -17,6 +18,7 @@ export default function CreateRoomScreen(): React.JSX.Element {
   const error = useRoomStore((state) => state.error);
   const account = useAccountStore((state) => state.account);
   const [showCardCounts, setShowCardCounts] = useState(false);
+  const [isPublic, setIsPublic] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleCreate(): Promise<void> {
@@ -29,6 +31,7 @@ export default function CreateRoomScreen(): React.JSX.Element {
       account.avatar,
       FIXED_ENTRY_POINTS,
       showCardCounts,
+      isPublic,
     );
     setIsSubmitting(false);
     if (created) {
@@ -54,6 +57,13 @@ export default function CreateRoomScreen(): React.JSX.Element {
           </View>
           <Switch onValueChange={setShowCardCounts} value={showCardCounts} />
         </View>
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleTextWrap}>
+            <Text style={styles.label}>Make this room public</Text>
+            <Text style={styles.hint}>Anyone can join from the Rooms list without a code.</Text>
+          </View>
+          <Switch onValueChange={setIsPublic} value={isPublic} />
+        </View>
         {error !== null && <Text style={styles.error}>{error}</Text>}
       </View>
 
@@ -62,7 +72,7 @@ export default function CreateRoomScreen(): React.JSX.Element {
           label={isSubmitting ? 'Creating...' : 'Create room'}
           onPress={() => void handleCreate()}
         />
-        <PrimaryButton label="Back" onPress={() => router.back()} variant="secondary" />
+        <PrimaryButton label="Back" onPress={() => goBackOrHome(router)} variant="secondary" />
       </View>
     </Screen>
   );

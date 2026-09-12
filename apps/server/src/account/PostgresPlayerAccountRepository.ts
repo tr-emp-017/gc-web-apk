@@ -18,6 +18,7 @@ type PlayerRow = {
   readonly losses: number;
   readonly device_token_hash: string;
   readonly recovery_token_hash: string;
+  readonly is_bot: boolean;
   readonly created_at: Date;
   readonly updated_at: Date;
 };
@@ -53,13 +54,14 @@ function toRecord(row: PlayerRow): PlayerAccountRecord {
     losses: row.losses,
     deviceTokenHash: row.device_token_hash,
     recoveryTokenHash: row.recovery_token_hash,
+    isBot: row.is_bot,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 const SELECT_COLUMNS =
-  'player_id, username, display_name, avatar, games_played, wins, losses, device_token_hash, recovery_token_hash, created_at, updated_at';
+  'player_id, username, display_name, avatar, games_played, wins, losses, device_token_hash, recovery_token_hash, is_bot, created_at, updated_at';
 
 // Node-postgres (`pg`) talks the standard Postgres wire protocol — this same class works
 // unmodified against Supabase, Render Postgres, or any other Postgres provider; only the
@@ -181,6 +183,42 @@ export class PostgresPlayerAccountRepository implements PlayerAccountRepository 
       [recoveryTokenHash],
     );
     return this.firstRecord(result.rows);
+  }
+
+  async listTopPlayers(limit: number): Promise<readonly PlayerAccountRecord[]> {
+    const result = await this.pool.query<PlayerRow>(
+      `SELECT ${SELECT_COLUMNS} FROM players
+       ORDER BY wins DESC, games_played DESC, created_at ASC
+       LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map(toRecord);
+  }
+
+  async listBotAccounts(count: number): Promise<readonly PlayerAccountRecord[]> {
+    const result = await this.pool.query<PlayerRow>(
+      `SELECT ${SELECT_COLUMNS} FROM players
+       WHERE is_bot = true
+       ORDER BY random()
+       LIMIT $1`,
+      [count],
+    );
+    return result.rows.map(toRecord);
+  }
+
+  async incrementStats(playerId: string, isWin: boolean): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE players SET
+         games_played = games_played + 1,
+         wins = wins + CASE WHEN $2 THEN 1 ELSE 0 END,
+         losses = losses + CASE WHEN $2 THEN 0 ELSE 1 END,
+         updated_at = now()
+       WHERE player_id = $1`,
+      [playerId, isWin],
+    );
+    if (result.rowCount === 0) {
+      throw new AccountNotFoundError();
+    }
   }
 
   async rotateDeviceToken(

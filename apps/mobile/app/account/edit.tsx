@@ -12,6 +12,7 @@ import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { Screen, palette } from '../../src/components/Screen';
 import { AccountApiError } from '../../src/api/accountApi';
 import { useAccountStore } from '../../src/stores/accountStore';
+import { goBackOrHome } from '../../src/utils/goBackOrHome';
 
 type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'unchanged';
 const USERNAME_CHECK_DEBOUNCE_MS = 400;
@@ -77,7 +78,7 @@ export default function EditAccountScreen(): React.JSX.Element {
         displayName: displayName.trim(),
         avatar,
       });
-      router.back();
+      goBackOrHome(router);
     } catch (submitError) {
       setError(
         submitError instanceof AccountApiError
@@ -148,7 +149,7 @@ export default function EditAccountScreen(): React.JSX.Element {
           onPress={handleRegeneratePress}
           variant="secondary"
         />
-        <PrimaryButton label="Back" onPress={() => router.back()} variant="secondary" />
+        <PrimaryButton label="Back" onPress={() => goBackOrHome(router)} variant="secondary" />
       </View>
     </Screen>
   );

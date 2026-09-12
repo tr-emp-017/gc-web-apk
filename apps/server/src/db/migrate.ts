@@ -23,6 +23,11 @@ const STATEMENTS: readonly string[] = [
   'CREATE UNIQUE INDEX IF NOT EXISTS players_recovery_token_hash_key ON players (recovery_token_hash)',
   `CREATE UNIQUE INDEX IF NOT EXISTS players_client_request_id_key
      ON players (client_request_id) WHERE client_request_id IS NOT NULL`,
+  // Bot accounts: real, persisted rows (no one holds their device/recovery token) seated as
+  // opponents in "Play with Bots" matches so they behave exactly like real players everywhere
+  // — the leaderboard, and their own evolving win/loss record — instead of a fake overlay.
+  'ALTER TABLE players ADD COLUMN IF NOT EXISTS is_bot BOOLEAN NOT NULL DEFAULT false',
+  'CREATE INDEX IF NOT EXISTS players_is_bot_idx ON players (is_bot) WHERE is_bot = true',
 ];
 
 // A migration failure must never prevent the server from starting — the rest of the game

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { AvatarId } from '@gadha-chor/shared-types';
+import type { AvatarId, MatchResult } from '@gadha-chor/shared-types';
 import {
   AccountNotFoundError,
   InvalidCredentialError,
@@ -7,6 +7,33 @@ import {
   ValidationError,
 } from './accountErrors.js';
 import type { PlayerAccountService, UpdateAccountInput } from './PlayerAccountService.js';
+
+const MAX_BOTS_PER_MATCH = 5; // the largest table (6 players) needs at most 5 bot seats
+
+function toMatchResult(value: unknown, field: string): MatchResult {
+  if (value !== 'WIN' && value !== 'LOSS') {
+    throw new ValidationError(`${field} must be "WIN" or "LOSS".`);
+  }
+  return value;
+}
+
+function toBotResults(
+  value: unknown,
+): readonly { readonly playerId: string; readonly result: MatchResult }[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new ValidationError('botResults must be an array.');
+  }
+  return value.map((entry: unknown) => {
+    const record = entry as Record<string, unknown> | undefined;
+    return {
+      playerId: requireString(record?.playerId, 'botResults[].playerId'),
+      result: toMatchResult(record?.result, 'botResults[].result'),
+    };
+  });
+}
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
@@ -147,4 +174,40 @@ export function registerAccountRoutes(app: FastifyInstance, service: PlayerAccou
       }
     },
   );
+
+  app.get('/api/leaderboard', async (request, reply) => {
+    try {
+      const entries = await service.getLeaderboard();
+      return await reply.send({ entries });
+    } catch (error) {
+      return sendError(request, reply, error);
+    }
+  });
+
+  app.get('/api/bots', async (request, reply) => {
+    try {
+      const query = request.query as Record<string, unknown> | undefined;
+      const rawCount = Number(query?.count ?? MAX_BOTS_PER_MATCH);
+      const count = Number.isInteger(rawCount)
+        ? Math.min(Math.max(rawCount, 1), MAX_BOTS_PER_MATCH)
+        : MAX_BOTS_PER_MATCH;
+      const bots = await service.listBotPlayers(count);
+      return await reply.send({ bots });
+    } catch (error) {
+      return sendError(request, reply, error);
+    }
+  });
+
+  app.post('/api/accounts/me/match-result', async (request, reply) => {
+    try {
+      const deviceToken = extractBearerToken(request);
+      const body = request.body as Record<string, unknown> | undefined;
+      const result = toMatchResult(body?.result, 'result');
+      const botResults = toBotResults(body?.botResults);
+      await service.recordMatchResult(deviceToken, result, botResults);
+      return await reply.send({ ok: true });
+    } catch (error) {
+      return sendError(request, reply, error);
+    }
+  });
 }

@@ -5,6 +5,7 @@ import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { Screen, palette } from '../../src/components/Screen';
 import { AccountApiError } from '../../src/api/accountApi';
 import { useAccountStore } from '../../src/stores/accountStore';
+import { goBackOrHome } from '../../src/utils/goBackOrHome';
 
 export default function RecoverAccountScreen(): React.JSX.Element {
   const router = useRouter();
@@ -61,7 +62,7 @@ export default function RecoverAccountScreen(): React.JSX.Element {
           label={isSubmitting ? 'Restoring...' : 'Restore account'}
           onPress={() => void handleRecover()}
         />
-        <PrimaryButton label="Back" onPress={() => router.back()} variant="secondary" />
+        <PrimaryButton label="Back" onPress={() => goBackOrHome(router)} variant="secondary" />
       </View>
     </Screen>
   );

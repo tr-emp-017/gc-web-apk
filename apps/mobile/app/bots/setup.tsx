@@ -8,6 +8,7 @@ import { useRoomStore } from '../../src/stores/roomStore';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { BOT_DIFFICULTIES } from '../../src/bots/difficulties';
 import { BOT_PLAYER_COUNTS, type BotDifficultyId, type BotPlayerCount } from '../../src/bots/types';
+import { goBackOrHome } from '../../src/utils/goBackOrHome';
 
 const DEFAULT_PLAYER_COUNT: BotPlayerCount = 4;
 const DEFAULT_DIFFICULTY: BotDifficultyId = 'medium';
@@ -23,30 +24,61 @@ function randomSearchSeconds(): number {
   );
 }
 
+type Mode = 'bots' | 'real';
+
 export default function BotSetupScreen(): React.JSX.Element {
   const router = useRouter();
   const startBotMatch = useRoomStore((state) => state.startBotMatch);
+  const quickMatch = useRoomStore((state) => state.quickMatch);
+  const error = useRoomStore((state) => state.error);
   const account = useAccountStore((state) => state.account);
+  const [mode, setMode] = useState<Mode>('real');
   const [playerCount, setPlayerCount] = useState<BotPlayerCount>(DEFAULT_PLAYER_COUNT);
   const [difficulty, setDifficulty] = useState<BotDifficultyId>(DEFAULT_DIFFICULTY);
   const [showCardCounts, setShowCardCounts] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [isMatching, setIsMatching] = useState(false);
 
   useEffect(() => {
     if (countdown === null || account === null) {
       return;
     }
     if (countdown <= 0) {
-      startBotMatch(account.displayName, account.avatar, playerCount, difficulty, showCardCounts);
-      router.replace('/game');
+      void startBotMatch(
+        account.displayName,
+        account.avatar,
+        playerCount,
+        difficulty,
+        showCardCounts,
+      ).then(() => router.replace('/game'));
       return;
     }
     const timer = setTimeout(() => setCountdown((current) => (current ?? 1) - 1), 1000);
     return () => clearTimeout(timer);
   }, [countdown, account, playerCount, difficulty, showCardCounts, startBotMatch, router]);
 
-  function handleStart(): void {
-    setCountdown(randomSearchSeconds());
+  async function handleStart(): Promise<void> {
+    if (mode === 'bots') {
+      setCountdown(randomSearchSeconds());
+      return;
+    }
+    if (account === null) {
+      return;
+    }
+    setIsMatching(true);
+    const matched = await quickMatch(
+      account.displayName,
+      account.avatar,
+      playerCount,
+      showCardCounts,
+    );
+    setIsMatching(false);
+    if (matched) {
+      const room = useRoomStore.getState().room;
+      if (room !== null) {
+        router.replace(`/room/${room.code}`);
+      }
+    }
   }
 
   if (countdown !== null) {
@@ -73,6 +105,30 @@ export default function BotSetupScreen(): React.JSX.Element {
       <View style={styles.form}>
         {account !== null && <PlayingAsCard account={account} />}
 
+        <Text style={styles.label}>Who do you want to play with?</Text>
+        <View style={styles.optionsRow}>
+          <Pressable
+            accessibilityLabel="Play with bots"
+            accessibilityRole="button"
+            onPress={() => setMode('bots')}
+            style={[styles.modeOption, mode === 'bots' && styles.optionSelected]}
+          >
+            <Text style={[styles.modeOptionText, mode === 'bots' && styles.optionSelectedText]}>
+              🤖 Bots
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Play with real players"
+            accessibilityRole="button"
+            onPress={() => setMode('real')}
+            style={[styles.modeOption, mode === 'real' && styles.optionSelected]}
+          >
+            <Text style={[styles.modeOptionText, mode === 'real' && styles.optionSelectedText]}>
+              👥 Real players
+            </Text>
+          </Pressable>
+        </View>
+
         <Text style={styles.label}>Number of players</Text>
         <View style={styles.optionsRow}>
           {BOT_PLAYER_COUNTS.map((count) => (
@@ -92,31 +148,38 @@ export default function BotSetupScreen(): React.JSX.Element {
           ))}
         </View>
 
-        <Text style={styles.label}>Difficulty</Text>
-        <View style={styles.difficultyList}>
-          {BOT_DIFFICULTIES.map((option) => (
-            <Pressable
-              accessibilityLabel={`${option.label}, ${option.skillPercent}% skill`}
-              accessibilityRole="button"
-              key={option.id}
-              onPress={() => setDifficulty(option.id)}
-              style={[styles.difficultyOption, option.id === difficulty && styles.optionSelected]}
-            >
-              <Text style={styles.difficultyEmoji}>{option.emoji}</Text>
-              <View style={styles.difficultyTextWrap}>
-                <Text
+        {mode === 'bots' && (
+          <>
+            <Text style={styles.label}>Difficulty</Text>
+            <View style={styles.difficultyList}>
+              {BOT_DIFFICULTIES.map((option) => (
+                <Pressable
+                  accessibilityLabel={`${option.label}, ${option.skillPercent}% skill`}
+                  accessibilityRole="button"
+                  key={option.id}
+                  onPress={() => setDifficulty(option.id)}
                   style={[
-                    styles.difficultyLabel,
-                    option.id === difficulty && styles.optionSelectedText,
+                    styles.difficultyOption,
+                    option.id === difficulty && styles.optionSelected,
                   ]}
                 >
-                  {option.label}
-                </Text>
-                <Text style={styles.difficultyHint}>{option.skillPercent}% skill</Text>
-              </View>
-            </Pressable>
-          ))}
-        </View>
+                  <Text style={styles.difficultyEmoji}>{option.emoji}</Text>
+                  <View style={styles.difficultyTextWrap}>
+                    <Text
+                      style={[
+                        styles.difficultyLabel,
+                        option.id === difficulty && styles.optionSelectedText,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                    <Text style={styles.difficultyHint}>{option.skillPercent}% skill</Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        )}
 
         <View style={styles.toggleRow}>
           <View style={styles.toggleTextWrap}>
@@ -125,11 +188,15 @@ export default function BotSetupScreen(): React.JSX.Element {
           </View>
           <Switch onValueChange={setShowCardCounts} value={showCardCounts} />
         </View>
+        {mode === 'real' && error !== null && <Text style={styles.error}>{error}</Text>}
       </View>
 
       <View style={styles.actions}>
-        <PrimaryButton label="Start game" onPress={handleStart} />
-        <PrimaryButton label="Back" onPress={() => router.back()} variant="secondary" />
+        <PrimaryButton
+          label={isMatching ? 'Finding a table...' : 'Start game'}
+          onPress={() => void handleStart()}
+        />
+        <PrimaryButton label="Back" onPress={() => goBackOrHome(router)} variant="secondary" />
       </View>
     </Screen>
   );
@@ -160,6 +227,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 23,
     marginTop: 12,
+  },
+  error: {
+    color: palette.red,
+    fontSize: 14,
+  },
+  modeOption: {
+    alignItems: 'center',
+    backgroundColor: palette.white,
+    borderColor: '#DED8CC',
+    borderRadius: 14,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: 14,
+  },
+  modeOptionText: {
+    color: palette.ink,
+    fontSize: 15,
+    fontWeight: '700',
   },
   difficultyEmoji: {
     fontSize: 26,

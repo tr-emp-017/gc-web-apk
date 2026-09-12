@@ -2,6 +2,7 @@ import type {
   AvatarId,
   PublicGameState,
   PublicPlayer,
+  RoomListing,
   RoomSummary,
   VisibleCard,
 } from '@gadha-chor/shared-types';
@@ -32,6 +33,11 @@ type Room = {
   pool?: number;
   startedPlayerCount?: number;
   showCardCounts: boolean;
+  isPublic: boolean;
+  // Only ever set on a room created via quickMatch — the exact headcount it auto-starts at,
+  // bypassing the host/ready gate that startGame otherwise enforces. Undefined for every
+  // manually-created room (createRoom), regardless of its isPublic value.
+  targetPlayerCount?: number;
   pendingTransferRequest?: { readonly requesterId: string; readonly targetId: string };
 };
 
@@ -53,6 +59,7 @@ export class RoomManager {
     socketId: string,
     entryPoints: number,
     showCardCounts = false,
+    isPublic = false,
   ): { code: string; playerId: string; walletBalance: number } {
     if (!Number.isInteger(entryPoints) || entryPoints <= 0) {
       throw new Error('Entry points must be a positive number.');
@@ -78,6 +85,7 @@ export class RoomManager {
       reconnectTimers: new Map(),
       entryPoints,
       showCardCounts,
+      isPublic,
     });
     return { code, playerId, walletBalance };
   }
@@ -213,7 +221,16 @@ export class RoomManager {
     if ([...room.players.values()].some((player) => !player.ready)) {
       throw new Error('All players must be ready.');
     }
+    return this.beginMatch(room, playerId);
+  }
 
+  // The economics/engine-creation core shared by a host-triggered startGame and quickMatch's
+  // auto-start-on-full path — every caller has already decided the room is allowed to begin;
+  // this just makes it happen and reports the resulting state/balances.
+  private beginMatch(
+    room: Room,
+    viewerId: string,
+  ): { state: PublicGameState; balances: readonly { playerId: string; balance: number }[] } {
     const players = [...room.players.values()];
     if (players.some((player) => this.walletLedger.getBalance(player.id) < room.entryPoints)) {
       throw new Error('A player no longer has enough balance for the entry points.');
@@ -227,12 +244,109 @@ export class RoomManager {
     room.game = GameEngine.createGame(players.map(({ id, name }) => ({ id, name })));
     room.game.startGame();
     return {
-      state: this.publicGameState(room, playerId),
+      state: this.publicGameState(room, viewerId),
       balances: players.map((player) => ({
         playerId: player.id,
         balance: this.walletLedger.getBalance(player.id),
       })),
     };
+  }
+
+  // "Play a Match" → real players: joins an open public room targeting the same playerCount if
+  // one exists (never creating a redundant second one), otherwise creates a fresh public room
+  // with that target. Every joiner is marked ready immediately — there's no manual ready-up in
+  // this mode — and the instant the room reaches its target headcount, the match auto-starts
+  // with no host action at all.
+  quickMatch(
+    name: string,
+    avatar: AvatarId,
+    playerCount: number,
+    socketId: string,
+    entryPoints: number,
+    showCardCounts = false,
+  ): {
+    code: string;
+    playerId: string;
+    walletBalance: number;
+    started?: {
+      state: PublicGameState;
+      balances: readonly { playerId: string; balance: number }[];
+    };
+  } {
+    if (!Number.isInteger(playerCount) || playerCount < 3 || playerCount > 6) {
+      throw new Error('Player count must be between 3 and 6.');
+    }
+    const existing = [...this.rooms.values()].find(
+      (candidate) =>
+        candidate.isPublic &&
+        candidate.game === undefined &&
+        candidate.targetPlayerCount === playerCount &&
+        candidate.players.size < playerCount,
+    );
+
+    let room: Room;
+    let playerId: string;
+    let walletBalance: number;
+    if (existing !== undefined) {
+      room = existing;
+      playerId = randomUUID();
+      walletBalance = this.walletLedger.getBalance(playerId);
+      if (walletBalance < room.entryPoints) {
+        throw new Error('Insufficient balance to join this room.');
+      }
+      room.players.set(playerId, {
+        id: playerId,
+        name: this.cleanName(name),
+        avatar,
+        ready: true,
+        connected: true,
+        socketId,
+      });
+    } else {
+      const created = this.createRoom(name, avatar, socketId, entryPoints, showCardCounts, true);
+      room = this.getRoom(created.code);
+      room.targetPlayerCount = playerCount;
+      playerId = created.playerId;
+      walletBalance = created.walletBalance;
+    }
+
+    if (room.players.size === room.targetPlayerCount) {
+      try {
+        const started = this.beginMatch(room, playerId);
+        return { code: room.code, playerId, walletBalance, started };
+      } catch {
+        // The balance recheck inside beginMatch should never actually fail here — every
+        // joiner's balance was just checked synchronously above, and nothing else can run
+        // in between in this single-threaded, fully-synchronous manager — but if it somehow
+        // does, leave the room in LOBBY rather than lose the player's successful join.
+      }
+    }
+    return { code: room.code, playerId, walletBalance };
+  }
+
+  // A one-shot snapshot for the Rooms browser — every currently open (not yet started) room,
+  // public and private. A private room's code is never included; that omission is the entire
+  // privacy boundary (see RoomListing's own comment in shared-types).
+  listRooms(): readonly RoomListing[] {
+    const listings: RoomListing[] = [];
+    for (const room of this.rooms.values()) {
+      if (room.game !== undefined) {
+        continue;
+      }
+      const host = room.players.get(room.hostPlayerId);
+      if (host === undefined) {
+        continue;
+      }
+      listings.push({
+        isPublic: room.isPublic,
+        code: room.isPublic ? room.code : undefined,
+        hostName: host.name,
+        hostAvatar: host.avatar,
+        playerCount: room.players.size,
+        targetPlayerCount: room.targetPlayerCount,
+      });
+    }
+    return listings;
   }
 
   playCard(
@@ -243,7 +357,8 @@ export class RoomManager {
     state: PublicGameState;
     isInaam: boolean;
     chaalWinnerId?: string | undefined;
-    completedChaal?: readonly { readonly playerId: string; readonly card: VisibleCard }[] | undefined;
+    completedChaal?:
+      readonly { readonly playerId: string; readonly card: VisibleCard }[] | undefined;
     inaamReceiverId?: string | undefined;
     inaamCards?: readonly { readonly playerId: string; readonly card: VisibleCard }[] | undefined;
     leaderId?: string | undefined;
@@ -312,7 +427,10 @@ export class RoomManager {
       completedChaal:
         chaalJustCompleted && finishingCard !== undefined
           ? [
-              ...previous.currentChaal.map((play) => ({ playerId: play.playerId, card: play.card })),
+              ...previous.currentChaal.map((play) => ({
+                playerId: play.playerId,
+                card: play.card,
+              })),
               { playerId, card: finishingCard },
             ]
           : undefined,
@@ -402,11 +520,14 @@ export class RoomManager {
     const previous = room.game.getState();
     // Re-checked here too (not just at request time) — a third, unrelated player could have
     // left in between, and this is the last point before the hand actually moves.
-    const activePlayerCount = previous.players.filter((player) => player.status === 'ACTIVE').length;
+    const activePlayerCount = previous.players.filter(
+      (player) => player.status === 'ACTIVE',
+    ).length;
     if (activePlayerCount < 3) {
       throw new Error('At least 3 active players are required to complete this transfer.');
     }
-    const cardCount = previous.players.find((player) => player.id === pending.targetId)?.hand.length ?? 0;
+    const cardCount =
+      previous.players.find((player) => player.id === pending.targetId)?.hand.length ?? 0;
     const state = room.game.transferHand(pending.requesterId, pending.targetId);
     const finishedPlayerIds = state.players
       .filter((player) => player.status === 'FINISHED')
@@ -427,7 +548,13 @@ export class RoomManager {
         rewards[finishedPlayerId] = reward;
       }
     }
-    return { accepted: true, cardCount, finishedPlayerIds, requesterId: pending.requesterId, rewards };
+    return {
+      accepted: true,
+      cardCount,
+      finishedPlayerIds,
+      requesterId: pending.requesterId,
+      rewards,
+    };
   }
 
   getRoom(code: string): Room {
@@ -448,6 +575,8 @@ export class RoomManager {
       entryPoints: room.entryPoints,
       pool: room.pool,
       showCardCounts: room.showCardCounts,
+      isPublic: room.isPublic,
+      targetPlayerCount: room.targetPlayerCount,
     };
   }
 

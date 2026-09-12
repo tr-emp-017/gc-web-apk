@@ -25,6 +25,13 @@ export default function RoomLobbyScreen(): React.JSX.Element {
   const currentPlayer = currentRoom?.players.find((player) => player.id === playerId);
   const isHost = currentPlayer?.isHost === true;
   const allReady = currentRoom?.players.every((player) => player.ready) === true;
+  // Quick-match rooms (see room:quickMatch) auto-start the instant targetPlayerCount is
+  // reached — there's no ready-up or host-start action for anyone in this mode.
+  const isQuickMatch = currentRoom?.targetPlayerCount !== undefined;
+  const playersNeeded = Math.max(
+    0,
+    (currentRoom?.targetPlayerCount ?? 0) - (currentRoom?.players.length ?? 0),
+  );
 
   useEffect(() => {
     if (gameState?.status === 'PLAYING') {
@@ -114,18 +121,28 @@ export default function RoomLobbyScreen(): React.JSX.Element {
 
       {error !== null && <Text style={styles.error}>{error}</Text>}
       <View style={styles.actions}>
-        {isHost && (
-          <PrimaryButton
-            label="Start game"
-            onPress={() => void startGame()}
-            variant={allReady && currentRoom.players.length >= 3 ? 'primary' : 'secondary'}
-          />
-        )}
-        {!isHost && (
-          <PrimaryButton
-            label={currentPlayer?.ready ? 'Mark not ready' : 'I am ready'}
-            onPress={() => void setReady(!(currentPlayer?.ready ?? false))}
-          />
+        {isQuickMatch ? (
+          <Text style={styles.waitingBanner}>
+            {playersNeeded > 0
+              ? `Waiting for ${playersNeeded} more player${playersNeeded === 1 ? '' : 's'} to join…`
+              : 'Starting…'}
+          </Text>
+        ) : (
+          <>
+            {isHost && (
+              <PrimaryButton
+                label="Start game"
+                onPress={() => void startGame()}
+                variant={allReady && currentRoom.players.length >= 3 ? 'primary' : 'secondary'}
+              />
+            )}
+            {!isHost && (
+              <PrimaryButton
+                label={currentPlayer?.ready ? 'Mark not ready' : 'I am ready'}
+                onPress={() => void setReady(!(currentPlayer?.ready ?? false))}
+              />
+            )}
+          </>
         )}
         <PrimaryButton
           label="Leave room"
@@ -256,5 +273,11 @@ const styles = StyleSheet.create({
     color: palette.muted,
     fontSize: 11,
     fontWeight: '800',
+  },
+  waitingBanner: {
+    color: palette.muted,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

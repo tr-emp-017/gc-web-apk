@@ -6,6 +6,7 @@ import { PlayingAsCard } from '../../src/components/PlayingAsCard';
 import { Screen, palette } from '../../src/components/Screen';
 import { useRoomStore } from '../../src/stores/roomStore';
 import { useAccountStore } from '../../src/stores/accountStore';
+import { goBackOrHome } from '../../src/utils/goBackOrHome';
 
 export default function JoinRoomScreen(): React.JSX.Element {
   const router = useRouter();
@@ -69,7 +70,7 @@ export default function JoinRoomScreen(): React.JSX.Element {
           label={isSubmitting ? 'Joining...' : 'Join room'}
           onPress={() => void handleJoin()}
         />
-        <PrimaryButton label="Back" onPress={() => router.back()} variant="secondary" />
+        <PrimaryButton label="Back" onPress={() => goBackOrHome(router)} variant="secondary" />
       </View>
     </Screen>
   );

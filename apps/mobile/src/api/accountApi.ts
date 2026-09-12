@@ -1,6 +1,9 @@
 import type {
+  BotPlayerIdentity,
   CreateAccountRequest,
   CreateAccountResponse,
+  LeaderboardEntry,
+  MatchResult,
   PlayerAccount,
   RecoverAccountResponse,
   RegenerateRecoveryTokenResponse,
@@ -38,7 +41,9 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => undefined);
     const message =
-      typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string'
+      typeof body === 'object' &&
+      body !== null &&
+      typeof (body as { error?: unknown }).error === 'string'
         ? (body as { error: string }).error
         : `Request failed with status ${response.status}.`;
     throw new AccountApiError(message, response.status);
@@ -96,4 +101,31 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
     { method: 'GET' },
   );
   return available;
+}
+
+export async function getLeaderboard(): Promise<readonly LeaderboardEntry[]> {
+  const { entries } = await request<{ entries: readonly LeaderboardEntry[] }>('/api/leaderboard', {
+    method: 'GET',
+  });
+  return entries;
+}
+
+export async function getBotPlayers(count: number): Promise<readonly BotPlayerIdentity[]> {
+  const { bots } = await request<{ bots: readonly BotPlayerIdentity[] }>(
+    `/api/bots?count=${count}`,
+    { method: 'GET' },
+  );
+  return bots;
+}
+
+export async function recordMatchResult(
+  deviceToken: string,
+  result: MatchResult,
+  botResults: readonly { readonly playerId: string; readonly result: MatchResult }[] = [],
+): Promise<void> {
+  await request('/api/accounts/me/match-result', {
+    method: 'POST',
+    headers: authHeaders(deviceToken),
+    body: JSON.stringify({ botResults, result }),
+  });
 }

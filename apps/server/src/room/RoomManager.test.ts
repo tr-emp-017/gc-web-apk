@@ -188,7 +188,9 @@ describe('RoomManager', () => {
   describe('entry points and wallet', () => {
     it('rejects a non-positive entry points value', () => {
       const manager = new RoomManager();
-      expect(() => manager.createRoom('Aslam', 'beard-glasses', 'socket-host', 0)).toThrow(/positive number/);
+      expect(() => manager.createRoom('Aslam', 'beard-glasses', 'socket-host', 0)).toThrow(
+        /positive number/,
+      );
       expect(() => manager.createRoom('Aslam', 'beard-glasses', 'socket-host', -5)).toThrow(
         /positive number/,
       );
@@ -196,9 +198,9 @@ describe('RoomManager', () => {
 
     it('rejects room creation when the host cannot afford the entry points', () => {
       const manager = new RoomManager(60_000, new InMemoryWalletLedger(50));
-      expect(() => manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS)).toThrow(
-        /Insufficient balance/,
-      );
+      expect(() =>
+        manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS),
+      ).toThrow(/Insufficient balance/);
     });
 
     it('rejects joining a room the player cannot afford', () => {
@@ -511,7 +513,11 @@ describe('RoomManager', () => {
     // Plays exactly one full chaal so the game settles back into "leading, chaal empty"
     // state (the only state a transfer request can be made from) and returns whichever
     // player is leading next.
-    function playOneChaal(manager: RoomManager, code: string, anyPlayerId: string): PublicGameState {
+    function playOneChaal(
+      manager: RoomManager,
+      code: string,
+      anyPlayerId: string,
+    ): PublicGameState {
       let state = manager.getPublicGameState(code, anyPlayerId);
       const activeCount = state.players.filter((player) => player.status === 'ACTIVE').length;
       for (let turn = 0; turn < activeCount; turn += 1) {
@@ -611,7 +617,9 @@ describe('RoomManager', () => {
       const card = state.ownCards.find(
         (candidate) => state.requiredSuit === undefined || candidate.suit === state.requiredSuit,
       );
-      expect(() => manager.playCard(host.code, leaderId, (card as { id: string }).id)).not.toThrow();
+      expect(() =>
+        manager.playCard(host.code, leaderId, (card as { id: string }).id),
+      ).not.toThrow();
     });
 
     it('rejects a request from anyone other than the current leader', () => {
@@ -638,13 +646,12 @@ describe('RoomManager', () => {
       );
       const afterOnePlay = manager.playCard(host.code, leaderId, (card as { id: string }).id).state;
       const newCurrentPlayerId = afterOnePlay.currentPlayerId as string;
-      const someoneElse = afterOnePlay.players.find(
-        (player) => player.id !== newCurrentPlayerId,
-      )?.id as string;
+      const someoneElse = afterOnePlay.players.find((player) => player.id !== newCurrentPlayerId)
+        ?.id as string;
 
-      expect(() =>
-        manager.requestCardTransfer(host.code, newCurrentPlayerId, someoneElse),
-      ).toThrow(/leading a new chaal/);
+      expect(() => manager.requestCardTransfer(host.code, newCurrentPlayerId, someoneElse)).toThrow(
+        /leading a new chaal/,
+      );
     });
 
     it('rejects a duplicate request while one is already pending, and blocks normal play too', () => {
@@ -686,7 +693,125 @@ describe('RoomManager', () => {
         (candidate) =>
           leaderView.requiredSuit === undefined || candidate.suit === leaderView.requiredSuit,
       );
-      expect(() => manager.playCard(host.code, leaderId, (card as { id: string }).id)).not.toThrow();
+      expect(() =>
+        manager.playCard(host.code, leaderId, (card as { id: string }).id),
+      ).not.toThrow();
+    });
+  });
+
+  describe('quick match', () => {
+    it('creates a public room targeting the requested headcount when none is open', () => {
+      const manager = new RoomManager();
+      const session = manager.quickMatch('Aslam', 'beard-glasses', 3, 'socket-1', ENTRY_POINTS);
+
+      const summary = manager.getRoomSummary(session.code);
+      expect(summary.isPublic).toBe(true);
+      expect(summary.targetPlayerCount).toBe(3);
+      expect(summary.players).toHaveLength(1);
+      expect(summary.players[0]?.ready).toBe(true);
+      expect(session.started).toBeUndefined();
+    });
+
+    it('joins an existing open public room with the same target instead of creating a new one', () => {
+      const manager = new RoomManager();
+      const first = manager.quickMatch('Aslam', 'beard-glasses', 4, 'socket-1', ENTRY_POINTS);
+      const second = manager.quickMatch('Rahul', 'wink-tongue', 4, 'socket-2', ENTRY_POINTS);
+
+      expect(second.code).toBe(first.code);
+      expect(manager.getRoomSummary(first.code).players).toHaveLength(2);
+    });
+
+    it('does not join a public room targeting a different headcount', () => {
+      const manager = new RoomManager();
+      const first = manager.quickMatch('Aslam', 'beard-glasses', 3, 'socket-1', ENTRY_POINTS);
+      const second = manager.quickMatch('Rahul', 'wink-tongue', 4, 'socket-2', ENTRY_POINTS);
+
+      expect(second.code).not.toBe(first.code);
+    });
+
+    it('auto-starts the instant — and only the instant — the target headcount is reached', () => {
+      const manager = new RoomManager();
+      const first = manager.quickMatch('Aslam', 'beard-glasses', 3, 'socket-1', ENTRY_POINTS);
+      const second = manager.quickMatch('Rahul', 'wink-tongue', 3, 'socket-2', ENTRY_POINTS);
+      expect(second.started).toBeUndefined();
+      expect(manager.getRoomSummary(first.code).status).toBe('LOBBY');
+
+      const third = manager.quickMatch('Ali', 'donkey', 3, 'socket-3', ENTRY_POINTS);
+      expect(third.started).toBeDefined();
+      expect(manager.getRoomSummary(first.code).status).toBe('PLAYING');
+    });
+
+    it('never requires a manual ready-up or a host start', () => {
+      const manager = new RoomManager();
+      manager.quickMatch('Aslam', 'beard-glasses', 3, 'socket-1', ENTRY_POINTS);
+      manager.quickMatch('Rahul', 'wink-tongue', 3, 'socket-2', ENTRY_POINTS);
+      const third = manager.quickMatch('Ali', 'donkey', 3, 'socket-3', ENTRY_POINTS);
+
+      // No setReady/startGame call anywhere above — the third join alone must have started it.
+      expect(third.started?.state.status).toBe('PLAYING');
+    });
+
+    it('rejects a player count outside 3-6', () => {
+      const manager = new RoomManager();
+      expect(() =>
+        manager.quickMatch('Aslam', 'beard-glasses', 2, 'socket-1', ENTRY_POINTS),
+      ).toThrow(/between 3 and 6/);
+      expect(() =>
+        manager.quickMatch('Aslam', 'beard-glasses', 7, 'socket-1', ENTRY_POINTS),
+      ).toThrow(/between 3 and 6/);
+    });
+  });
+
+  describe('listing rooms', () => {
+    it('includes a public room’s code but omits a private one’s', () => {
+      const manager = new RoomManager();
+      const publicRoom = manager.quickMatch('Aslam', 'beard-glasses', 3, 'socket-1', ENTRY_POINTS);
+      manager.createRoom('Rahul', 'wink-tongue', 'socket-2', ENTRY_POINTS, false, false);
+
+      const listings = manager.listRooms();
+      const publicListing = listings.find((listing) => listing.isPublic);
+      const privateListing = listings.find((listing) => !listing.isPublic);
+
+      expect(publicListing?.code).toBe(publicRoom.code);
+      expect(publicListing?.targetPlayerCount).toBe(3);
+      expect(privateListing?.code).toBeUndefined();
+    });
+
+    it('also lists a manually-created room flagged public, with its code visible', () => {
+      const manager = new RoomManager();
+      const room = manager.createRoom(
+        'Aslam',
+        'beard-glasses',
+        'socket-1',
+        ENTRY_POINTS,
+        false,
+        true,
+      );
+
+      const listing = manager.listRooms().find((candidate) => candidate.code === room.code);
+      expect(listing?.isPublic).toBe(true);
+      expect(listing?.targetPlayerCount).toBeUndefined();
+    });
+
+    it('excludes a room whose game has already started', () => {
+      const manager = new RoomManager();
+      const host = manager.createRoom(
+        'Aslam',
+        'beard-glasses',
+        'socket-host',
+        ENTRY_POINTS,
+        false,
+        true,
+      );
+      manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-2');
+      manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-3');
+      manager.setReady(host.code, host.playerId, true);
+      for (const player of manager.getRoomSummary(host.code).players) {
+        manager.setReady(host.code, player.id, true);
+      }
+      manager.startGame(host.code, host.playerId);
+
+      expect(manager.listRooms().some((listing) => listing.code === host.code)).toBe(false);
     });
   });
 });

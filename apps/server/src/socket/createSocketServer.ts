@@ -30,6 +30,13 @@ export function createSocketServer(
     io.to(code).emit('room:updated', roomManager.getRoomSummary(code));
   };
 
+  // Broadcast to every connected socket, not just one room's channel — an open Rooms browser
+  // has no particular room to scope this to. The list itself is small (a handful of lightweight
+  // RoomListing entries), so a full broadcast on every list-affecting mutation is cheap.
+  const emitRoomsListUpdated = (): void => {
+    io.emit('rooms:updated', roomManager.listRooms());
+  };
+
   const emitGameState = (code: string): void => {
     for (const player of roomManager.getRoomSummary(code).players) {
       const playerSocketId = roomManager.getPlayer(code, player.id).socketId;
@@ -48,6 +55,7 @@ export function createSocketServer(
           socket.id,
           payload.entryPoints,
           payload.showCardCounts,
+          payload.isPublic,
         );
         socket.data.code = session.code;
         socket.data.playerId = session.playerId;
@@ -58,6 +66,7 @@ export function createSocketServer(
           playerId: session.playerId,
           walletBalance: session.walletBalance,
         });
+        emitRoomsListUpdated();
       } catch (error) {
         callback({ ok: false, error: errorMessage(error) });
       }
@@ -76,9 +85,57 @@ export function createSocketServer(
           walletBalance: session.walletBalance,
         });
         emitRoomUpdated(session.code);
+        emitRoomsListUpdated();
       } catch (error) {
         callback({ ok: false, error: errorMessage(error) });
       }
+    });
+
+    socket.on('room:quickMatch', (payload, callback) => {
+      try {
+        const session = roomManager.quickMatch(
+          payload.name,
+          payload.avatar,
+          payload.playerCount,
+          socket.id,
+          payload.entryPoints,
+          payload.showCardCounts,
+        );
+        socket.data.code = session.code;
+        socket.data.playerId = session.playerId;
+        void socket.join(session.code);
+        callback({
+          ok: true,
+          room: roomManager.getRoomSummary(session.code),
+          playerId: session.playerId,
+          walletBalance: session.walletBalance,
+        });
+        if (session.started !== undefined) {
+          for (const player of roomManager.getRoomSummary(session.code).players) {
+            const playerSocketId = roomManager.getPlayer(session.code, player.id).socketId;
+            if (playerSocketId !== undefined) {
+              io.to(playerSocketId).emit(
+                'game:started',
+                roomManager.getPublicGameState(session.code, player.id),
+              );
+            }
+          }
+          for (const balance of session.started.balances) {
+            const playerSocketId = roomManager.getPlayer(session.code, balance.playerId).socketId;
+            if (playerSocketId !== undefined) {
+              io.to(playerSocketId).emit('wallet:updated', { balance: balance.balance });
+            }
+          }
+        }
+        emitRoomUpdated(session.code);
+        emitRoomsListUpdated();
+      } catch (error) {
+        callback({ ok: false, error: errorMessage(error) });
+      }
+    });
+
+    socket.on('room:list', (callback) => {
+      callback({ ok: true, rooms: roomManager.listRooms() });
     });
 
     socket.on('game:reconnect', (payload, callback) => {
@@ -113,7 +170,15 @@ export function createSocketServer(
         void socket.leave(session.code);
         clearSession(socket);
         callback({ ok: true });
-        emitRoomUpdated(session.code);
+        // Comes first: leave() may have emptied and deleted the room, which would make
+        // emitRoomUpdated below throw (room no longer found) — the list update itself is
+        // always safe since it just reflects whichever rooms are still there.
+        emitRoomsListUpdated();
+        try {
+          emitRoomUpdated(session.code);
+        } catch {
+          // Room was deleted because it emptied — nothing left to notify.
+        }
       } catch (error) {
         callback({ ok: false, error: errorMessage(error) });
       }
@@ -140,6 +205,7 @@ export function createSocketServer(
           }
         }
         emitRoomUpdated(session.code);
+        emitRoomsListUpdated();
       } catch (error) {
         callback({ ok: false, error: errorMessage(error) });
       }
@@ -155,6 +221,10 @@ export function createSocketServer(
         void socket.leave(session.code);
         clearSession(socket);
         roomManager.disconnect(session.code, session.playerId, () => {
+          // This only fires once the reconnect window actually expires and the player is
+          // removed (or the now-empty room deleted) — the moment the Rooms browser's listed
+          // headcount for this room, if any, actually changes.
+          emitRoomsListUpdated();
           try {
             emitRoomUpdated(session.code);
           } catch {
@@ -219,6 +289,8 @@ export function createSocketServer(
         // getPublicGameState throws in that case. room:updated alone (status now 'LOBBY') is
         // what tells every client to drop back to the lobby and clear their stale gameState.
         emitRoomUpdated(session.code);
+        // The room is joinable/listed again now that it's back in LOBBY.
+        emitRoomsListUpdated();
       } catch (error) {
         callback({ ok: false, error: errorMessage(error) });
       }
@@ -325,6 +397,8 @@ export function createSocketServer(
           }
         }
         emitRoomUpdated(session.code);
+        // The room drops off the Rooms browser now that it's PLAYING.
+        emitRoomsListUpdated();
       } catch (error) {
         callback({ ok: false, error: errorMessage(error) });
       }
@@ -342,7 +416,11 @@ export function createSocketServer(
           cardId: payload.cardId,
           isInaam: result.isInaam,
         });
-        if (result.isInaam && result.leaderId !== undefined && result.inaamReceiverId !== undefined) {
+        if (
+          result.isInaam &&
+          result.leaderId !== undefined &&
+          result.inaamReceiverId !== undefined
+        ) {
           io.to(session.code).emit('inaam:given', {
             playerId: session.playerId,
             cardId: payload.cardId,
@@ -420,7 +498,11 @@ export function createSocketServer(
         return;
       }
       try {
-        const result = roomManager.respondCardTransfer(session.code, session.playerId, payload.accept);
+        const result = roomManager.respondCardTransfer(
+          session.code,
+          session.playerId,
+          payload.accept,
+        );
         callback({ ok: true });
         io.to(session.code).emit('card:transferResolved', {
           requesterId: result.requesterId,
@@ -506,6 +588,10 @@ export function createSocketServer(
       try {
         const endedState = roomManager.endGameForExit(session.code, session.playerId);
         roomManager.disconnect(session.code, session.playerId, () => {
+          // This only fires once the reconnect window actually expires and the player is
+          // removed (or the now-empty room deleted) — the moment the Rooms browser's listed
+          // headcount for this room, if any, actually changes.
+          emitRoomsListUpdated();
           try {
             emitRoomUpdated(session.code);
           } catch {
