@@ -120,7 +120,14 @@ const NATIVE_TABLE_VERTICAL_STRETCH = 1.12;
 const HAND_OVERLAP_MULTIPLIER_NATIVE = 1.2;
 // Small deliberate gap between the hand's bottom edge and the true screen edge — enough to
 // avoid looking pasted flush against the bezel, not enough to reintroduce a large dead margin.
-const HAND_BOTTOM_MARGIN_NATIVE_PX = 15;
+const HAND_BOTTOM_MARGIN_NATIVE_PX = 20;
+// Web-only: reserves real, guaranteed empty space at the very bottom of the browser
+// viewport itself (shrinking the table's own available height), rather than trying to
+// position the hand further from the table's bottom edge — the table's bottom edge is
+// always pinned to the full viewport's bottom edge by construction, so nudging the hand's
+// own offset alone never actually reveals more space below it on web. Change this value to
+// adjust the web-only bottom margin under the hand.
+const HAND_BOTTOM_MARGIN_WEB_PX = 20;
 // Table/thrown/discard-pile cards are rendered at "played" size and visually scaled up —
 // scaling is centered on each card's own box, so none of the position/centering math below
 // needs to change to account for it.
@@ -159,7 +166,7 @@ const DISCARD_PILE_Y_PERCENT = 64;
 const DISCARD_PILE_VISIBLE_DEPTH = 5;
 // How long a finished trick sits still (winning card highlighted) before it's swept up,
 // and how long that sweep-to-the-discard-pile animation takes.
-const TRICK_HOLD_MS = 3000;
+const TRICK_HOLD_MS = 2000;
 const TRICK_COLLECT_MS = 550;
 // An Inaam briefly gathers every card from that chaal in the center before sweeping them
 // all toward whoever receives them — shorter than the regular trick hold since there's no
@@ -953,14 +960,22 @@ export default function GameTableScreen(): React.JSX.Element {
   const tableTopPx = insets.top + availableHeight - renderedBoxHeight;
   // The hand is anchored inside the table's own coordinate space (so its width/centering
   // still track the table), pulled up from the table's own bottom edge by a small deliberate
-  // margin so it doesn't look pasted flush against it. Web's handWrap uses its own unrelated
-  // percentage-based anchor and never reads this.
-  const handBottomGapPx = HAND_BOTTOM_MARGIN_NATIVE_PX;
+  // margin so it doesn't look pasted flush against it — table size/position is unaffected,
+  // only the hand's own offset changes. Web gets its own (larger) value, independently
+  // tunable from the native one.
+  const handBottomGapPx = Platform.OS === 'web' ? HAND_BOTTOM_MARGIN_WEB_PX : HAND_BOTTOM_MARGIN_NATIVE_PX;
   // Where the soundboard button actually sits on the real screen (not just within the table's
   // own coordinate space), so the Modal-based popup below can anchor near it despite living in
   // its own top-level window rather than TableWrap's view tree.
   const soundboardPanelLeftPx = insets.left + (availableWidth - boxWidth) / 2 + 18;
   const soundboardPanelBottomPx = winHeight - (tableTopPx + renderedBoxHeight) + 14;
+  // Same reasoning for the settings panel: it renders in a real Modal (its own top-level
+  // window, guaranteed to draw above every other on-screen element, including the table/cards)
+  // rather than an absolutely-positioned sibling view, so it needs screen-absolute coordinates
+  // instead of the table-relative ones the settings button itself still uses.
+  const settingsPanelRightPx =
+    winWidth - (insets.left + (availableWidth - boxWidth) / 2 + boxWidth) + 12;
+  const settingsPanelTopPx = tableTopPx + 54;
 
   return (
     <View
@@ -1054,6 +1069,7 @@ export default function GameTableScreen(): React.JSX.Element {
           setReactionTargetId(null);
         }}
         player={profileModalPlayer}
+        showCardCounts={room?.showCardCounts ?? false}
       />
 
       {/* A real Modal (its own top-level native window) rather than an absolutely-positioned
@@ -1116,15 +1132,6 @@ export default function GameTableScreen(): React.JSX.Element {
         ]}
         tableImageStyle={styles.tableImage}
       >
-        <Pressable
-          accessibilityLabel="Leave the table"
-          accessibilityRole="button"
-          onPress={handleExitTable}
-          style={styles.closeButton}
-        >
-          <Text style={styles.closeButtonText}>✕</Text>
-        </Pressable>
-
         <View style={styles.settingsAnchor}>
           <Pressable
             accessibilityLabel="Settings"
@@ -1134,53 +1141,79 @@ export default function GameTableScreen(): React.JSX.Element {
           >
             <Ionicons color={palette.ink} name="settings-sharp" size={18} />
           </Pressable>
-          {settingsOpen && (
-            <>
-              <Pressable
-                accessibilityLabel="Close settings"
-                accessibilityRole="button"
-                onPress={() => setSettingsOpen(false)}
-                style={styles.settingsOverlay}
-              />
-              <View style={styles.settingsPanel}>
-                {unavailable ? (
-                  <Text style={styles.settingsLabel}>Voice chat is unavailable.</Text>
-                ) : (
-                  <>
-                    <Pressable
-                      accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-                      accessibilityRole="button"
-                      onPress={toggleMuted}
-                      style={styles.settingsRow}
-                    >
-                      <Ionicons
-                        color={isMuted ? palette.muted : palette.red}
-                        name={isMuted ? 'mic-off' : 'mic'}
-                        size={18}
-                      />
-                      <Text style={styles.settingsLabel}>{isMuted ? 'Mic off' : 'Mic on'}</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityLabel={isSpeakerEnabled ? 'Turn speaker off' : 'Turn speaker on'}
-                      accessibilityRole="button"
-                      onPress={toggleSpeaker}
-                      style={styles.settingsRow}
-                    >
-                      <Ionicons
-                        color={isSpeakerEnabled ? palette.red : palette.muted}
-                        name={isSpeakerEnabled ? 'volume-high' : 'volume-mute'}
-                        size={18}
-                      />
-                      <Text style={styles.settingsLabel}>
-                        {isSpeakerEnabled ? 'Sound on' : 'Sound off'}
-                      </Text>
-                    </Pressable>
-                  </>
-                )}
-              </View>
-            </>
-          )}
         </View>
+
+        {/* A real Modal (its own top-level native window) rather than an absolutely-positioned
+            sibling view — guarantees the panel always draws above every other on-screen
+            element (table, cards, seats), which plain zIndex/elevation on a sibling view
+            couldn't reliably promise on Android. */}
+        <Modal
+          animationType="fade"
+          onRequestClose={() => setSettingsOpen(false)}
+          transparent
+          visible={settingsOpen}
+        >
+          <Pressable
+            accessibilityLabel="Close settings"
+            accessibilityRole="button"
+            onPress={() => setSettingsOpen(false)}
+            style={StyleSheet.absoluteFill}
+          />
+          <View
+            style={[
+              styles.settingsPanel,
+              { position: 'absolute', right: settingsPanelRightPx, top: settingsPanelTopPx },
+            ]}
+          >
+            {unavailable ? (
+              <Text style={styles.settingsLabel}>Voice chat is unavailable.</Text>
+            ) : (
+              <>
+                <Pressable
+                  accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                  accessibilityRole="button"
+                  onPress={toggleMuted}
+                  style={styles.settingsRow}
+                >
+                  <Ionicons
+                    color={isMuted ? palette.muted : palette.red}
+                    name={isMuted ? 'mic-off' : 'mic'}
+                    size={18}
+                  />
+                  <Text style={styles.settingsLabel}>{isMuted ? 'Mic off' : 'Mic on'}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={isSpeakerEnabled ? 'Turn speaker off' : 'Turn speaker on'}
+                  accessibilityRole="button"
+                  onPress={toggleSpeaker}
+                  style={styles.settingsRow}
+                >
+                  <Ionicons
+                    color={isSpeakerEnabled ? palette.red : palette.muted}
+                    name={isSpeakerEnabled ? 'volume-high' : 'volume-mute'}
+                    size={18}
+                  />
+                  <Text style={styles.settingsLabel}>
+                    {isSpeakerEnabled ? 'Sound on' : 'Sound off'}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+            <View style={styles.settingsDivider} />
+            <Pressable
+              accessibilityLabel="Leave the table"
+              accessibilityRole="button"
+              onPress={() => {
+                setSettingsOpen(false);
+                handleExitTable();
+              }}
+              style={styles.settingsRow}
+            >
+              <Ionicons color={palette.red} name="exit-outline" size={18} />
+              <Text style={[styles.settingsLabel, styles.settingsLeaveLabel]}>Leave</Text>
+            </Pressable>
+          </View>
+        </Modal>
 
         {latestReaction !== null && (
           <View style={styles.reactionToast}>
@@ -1230,7 +1263,15 @@ export default function GameTableScreen(): React.JSX.Element {
                   <Image
                     resizeMode="cover"
                     source={AVATAR_IMAGES[player.avatar]}
-                    style={styles.playerAvatarImage}
+                    // Also sized/rounded directly on the Image itself, not just the clipping
+                    // View around it — on Android, an Image whose only sizing comes from a
+                    // parent View's dynamically-computed style (avatarSizeStyle is a fresh
+                    // object every render, and the array it's composed into also changes
+                    // whenever isTurn/isOut flip) can fail to paint until something forces a
+                    // fresh layout pass, which made avatars appear to only show up on a
+                    // player's own turn. Giving the Image explicit numeric dimensions makes it
+                    // paint reliably regardless of what else in the style array changes.
+                    style={[styles.playerAvatarImage, avatarSizeStyle]}
                   />
                 </View>
                 {funSoundFlashPlayerIds.has(player.id) && <AvatarFlash sizePx={avatarSizePx} />}
@@ -1426,28 +1467,53 @@ export default function GameTableScreen(): React.JSX.Element {
             />
           ))}
 
-          {discardPile.length > 0 && (
-            <View
-              style={[
-                styles.discardPile,
-                { left: `${DISCARD_PILE_X_PERCENT}%`, top: `${DISCARD_PILE_Y_PERCENT}%` },
-              ]}
-            >
-              {discardPile.slice(-DISCARD_PILE_VISIBLE_DEPTH).map((card, index) => (
-                <PlayingCard
-                  faceDown
-                  key={card.id}
-                  size="played"
+          {discardPile.length > 0 &&
+            (() => {
+              // Every card in the pile shares this same center anchor (each is centered via
+              // its own -33/-46 half-width/half-height margin, nudged +-2px per depth for the
+              // stacked look) — the topmost, most-recent card is the last one rendered below.
+              // The count badge is pinned to that card's own visual (post-scale) top-right
+              // corner, rather than a fixed pixel offset, so it stays right next to the pile
+              // regardless of table size or how many cards are in it.
+              const topIndex = Math.min(discardPile.length, DISCARD_PILE_VISIBLE_DEPTH) - 1;
+              const topOffsetPx = topIndex * 2;
+              const scaledHalfWidthPx = (66 * TABLE_CARD_SCALE * responsiveScale) / 2;
+              const scaledHalfHeightPx = (92 * TABLE_CARD_SCALE * responsiveScale) / 2;
+              return (
+                <View
                   style={[
-                    styles.discardPileCard,
-                    tableCardTransformStyle,
-                    { marginLeft: -33 + index * 2, marginTop: -46 - index * 2 },
+                    styles.discardPile,
+                    { left: `${DISCARD_PILE_X_PERCENT}%`, top: `${DISCARD_PILE_Y_PERCENT}%` },
                   ]}
-                />
-              ))}
-              <Text style={styles.discardPileCount}>{discardPile.length}</Text>
-            </View>
-          )}
+                >
+                  {discardPile.slice(-DISCARD_PILE_VISIBLE_DEPTH).map((card, index) => (
+                    <PlayingCard
+                      faceDown
+                      key={card.id}
+                      size="played"
+                      style={[
+                        styles.discardPileCard,
+                        tableCardTransformStyle,
+                        { marginLeft: -33 + index * 2, marginTop: -46 - index * 2 },
+                      ]}
+                    />
+                  ))}
+                  {room?.showCardCounts === true && (
+                    <Text
+                      style={[
+                        styles.discardPileCount,
+                        {
+                          left: topOffsetPx + scaledHalfWidthPx - (55),
+                          top: -topOffsetPx - scaledHalfHeightPx - (-30),
+                        },
+                      ]}
+                    >
+                      {discardPile.length}
+                    </Text>
+                  )}
+                </View>
+              );
+            })()}
 
           {transferAnimation !== null &&
             (() => {
@@ -1533,7 +1599,14 @@ export default function GameTableScreen(): React.JSX.Element {
         <View
           style={[
             styles.handWrap,
-            { bottom: handBottomGapPx, marginTop: 0, top: undefined },
+            // `top: 'auto'` (not `undefined`) is what actually cancels handWrap's base
+            // `top: '80%'` here — react-native-web doesn't reliably drop a style property
+            // set to `undefined` later in the same array, so `top: '80%'` was silently
+            // staying active alongside `bottom` on web, and a position with both top and
+            // bottom set stretches to fill that span instead of respecting bottom alone —
+            // which is why changing handBottomGapPx had no visible effect on web even
+            // though the exact same code worked fine on native.
+            { bottom: handBottomGapPx, marginTop: 0, top: 'auto' },
           ]}
         >
           <DraggableHand
@@ -1558,7 +1631,6 @@ const styles = StyleSheet.create({
   },
   activeAvatar: {
     borderColor: palette.red,
-    borderWidth: 3,
   },
   cryingDonkeyImage: {
     height: 110,
@@ -1645,23 +1717,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: '100%',
   },
-  closeButton: {
-    alignItems: 'center',
-    backgroundColor: palette.red,
-    borderRadius: 10,
-    height: 32,
-    justifyContent: 'center',
-    left: 10,
-    position: 'absolute',
-    top: 10,
-    width: 32,
-    zIndex: 1000,
-  },
-  closeButtonText: {
-    color: palette.white,
-    fontSize: 16,
-    fontWeight: '900',
-  },
   discardPile: {
     alignItems: 'center',
     position: 'absolute',
@@ -1675,7 +1730,6 @@ const styles = StyleSheet.create({
     color: palette.white,
     fontSize: 10,
     fontWeight: '800',
-    left: 38,
     minWidth: 18,
     paddingHorizontal: 4,
     paddingVertical: 1,
@@ -1735,7 +1789,16 @@ const styles = StyleSheet.create({
   playerAvatar: {
     alignItems: 'center',
     backgroundColor: '#D9E4D5',
+    // A constant, always-present border (not just when it's this player's turn) — Android has
+    // a longstanding bug where a View with overflow:'hidden' + borderRadius but NO border can
+    // fail to clip/paint its child content at all until a border is present. Previously only
+    // activeAvatar added a border, so the avatar image only ever rendered during that
+    // player's own turn (when the border briefly appeared), then went blank again once the
+    // border was removed. Keeping the border width constant and only swapping its color for
+    // the active turn keeps the exact same visual highlight while fixing this permanently.
+    borderColor: 'transparent',
     borderRadius: 32,
+    borderWidth: 3,
     height: 64,
     justifyContent: 'center',
     overflow: 'hidden',
@@ -1814,18 +1877,18 @@ const styles = StyleSheet.create({
     width: 36,
     zIndex: 1000,
   },
+  settingsDivider: {
+    backgroundColor: '#EEE9DF',
+    height: 1,
+    marginVertical: 2,
+  },
   settingsLabel: {
     color: palette.ink,
     fontSize: 13,
     fontWeight: '700',
   },
-  settingsOverlay: {
-    bottom: -1000,
-    left: -1000,
-    position: 'absolute',
-    right: -1000,
-    top: -1000,
-    zIndex: 999,
+  settingsLeaveLabel: {
+    color: palette.red,
   },
   settingsPanel: {
     backgroundColor: palette.white,
@@ -1833,10 +1896,7 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 10,
     position: 'absolute',
-    right: 12,
-    top: 54,
     width: 150,
-    zIndex: 1000,
   },
   settingsRow: {
     alignItems: 'center',

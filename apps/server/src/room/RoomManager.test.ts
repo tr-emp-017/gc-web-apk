@@ -453,6 +453,58 @@ describe('RoomManager', () => {
 
       expect(manager.endGameForExit(host.code, third.playerId)).toBeUndefined();
     });
+
+    it('never blames a player who already finished, even after they leave and later disconnect', () => {
+      const manager = new RoomManager();
+      const host = manager.createRoom('Aslam', 'beard-glasses', 'socket-host', ENTRY_POINTS);
+      const second = manager.joinRoom(host.code, 'Rahul', 'wink-tongue', 'socket-second');
+      const third = manager.joinRoom(host.code, 'Ali', 'donkey', 'socket-third');
+      manager.setReady(host.code, second.playerId, true);
+      manager.setReady(host.code, third.playerId, true);
+      manager.startGame(host.code, host.playerId);
+
+      let state = manager.getPublicGameState(host.code, host.playerId);
+      let firstFinishedId: string | undefined;
+      for (let turn = 0; firstFinishedId === undefined && turn < 500; turn += 1) {
+        const currentPlayerId = state.currentPlayerId;
+        if (currentPlayerId === undefined) {
+          throw new Error('A playable game must have a current player.');
+        }
+        const viewerState = manager.getPublicGameState(host.code, currentPlayerId);
+        const playableCard = viewerState.firstMovePending
+          ? viewerState.ownCards.find((card) => card.suit === 'spades' && card.rank === 14)
+          : (viewerState.ownCards.find(
+              (card) =>
+                viewerState.requiredSuit === undefined || card.suit === viewerState.requiredSuit,
+            ) ?? viewerState.ownCards[0]);
+        if (playableCard === undefined) {
+          throw new Error('An active player must have a card to play.');
+        }
+        const result = manager.playCard(host.code, currentPlayerId, playableCard.id);
+        state = result.state;
+        firstFinishedId = result.finishedPlayerIds[0];
+      }
+      if (firstFinishedId === undefined) {
+        throw new Error('Expected some player to finish before the game ended.');
+      }
+
+      // Real client flow: a finished player explicitly chooses to leave.
+      manager.leaveGame(host.code, firstFinishedId);
+      expect(
+        manager.getRoomSummary(host.code).players.find((p) => p.id === firstFinishedId)?.status,
+      ).toBe('LEFT');
+
+      // The raw socket 'disconnect' handler calls endGameForExit for EVERY dropped connection —
+      // including this now-departed, already-finished player's, whenever their socket later
+      // drops. That must be a no-op: they already won, so they can never retroactively become
+      // the Gadha Chor just because their connection dropped afterward.
+      expect(manager.endGameForExit(host.code, firstFinishedId)).toBeUndefined();
+      expect(manager.getPublicGameState(host.code, host.playerId).status).toBe('PLAYING');
+
+      const { finalState } = playGameToCompletion(manager, host.code, host.playerId);
+      expect(finalState.status).toBe('GAME_OVER');
+      expect(finalState.gadhaChorId).not.toBe(firstFinishedId);
+    });
   });
 
   describe('requesting a card transfer', () => {

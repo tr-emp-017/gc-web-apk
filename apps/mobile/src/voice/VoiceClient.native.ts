@@ -92,7 +92,14 @@ export class VoiceClient {
     if (this.started) return;
     const { mediaDevices } = loadWebRTC();
     this.localStream = await mediaDevices.getUserMedia({ audio: true, video: false });
-    InCallManager?.start({ media: 'audio' });
+    // `auto` (default true) is InCallManager's "act like a phone call" switch — with it on,
+    // the library turns the screen off via the proximity sensor whenever the audio route is
+    // the earpiece (which is the default route the moment voice chat starts, before the
+    // player has opted into speaker). This is a group voice chat for a game played by looking
+    // at the screen, not a phone call, so that behavior is disabled outright; keep-screen-on,
+    // mic capture, speaker routing, and the audio mode used for echo cancellation are all set
+    // by separate calls below/elsewhere and are unaffected by this flag.
+    InCallManager?.start({ auto: false, media: 'audio' });
     InCallManager?.setForceSpeakerphoneOn(true);
     this.started = true;
     this.socket.emit('voice:join', (response) => {

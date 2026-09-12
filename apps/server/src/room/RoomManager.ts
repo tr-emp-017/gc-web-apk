@@ -481,10 +481,19 @@ export class RoomManager {
     if (room.game === undefined) {
       return undefined;
     }
-    if (room.game.getState().status !== 'PLAYING') {
+    const gameState = room.game.getState();
+    if (gameState.status !== 'PLAYING') {
       return undefined;
     }
     const player = this.getPlayerFromRoom(room, playerId);
+    // Only a player still holding cards (ACTIVE) can lose the match by exiting — this is also
+    // what the raw socket 'disconnect' handler calls for ANY dropped connection, so without
+    // this guard, a player who already finished (emptied their hand) and explicitly chose to
+    // leave or spectate would retroactively become the Gadha Chor the moment their socket
+    // later disconnects, even though they'd already won.
+    if (gameState.players.find((candidate) => candidate.id === playerId)?.status !== 'ACTIVE') {
+      return undefined;
+    }
     room.game.forceEndGame(playerId);
     player.postGameChoice = 'LEFT';
     this.clearPendingTransferIfInvolves(room, playerId);

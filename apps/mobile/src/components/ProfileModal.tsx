@@ -19,6 +19,10 @@ type ProfileModalProps = {
   readonly canRequestCards: boolean;
   readonly isRequestingCards: boolean;
   readonly onRequestCards: () => void;
+  // The host's room-level "show opponents' card counts" toggle — this is the only place
+  // any player's card count is ever shown, so when it's off, nobody's count is visible here
+  // either.
+  readonly showCardCounts: boolean;
 };
 
 // The player-profile popup: opened by tapping any opponent's seat. Shows who they are and
@@ -32,6 +36,7 @@ export function ProfileModal({
   canRequestCards,
   isRequestingCards,
   onRequestCards,
+  showCardCounts,
 }: ProfileModalProps): React.JSX.Element {
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={player !== null}>
@@ -68,10 +73,12 @@ export function ProfileModal({
                 <Text numberOfLines={1} style={styles.playerName}>
                   {player.name}
                 </Text>
-                <View style={styles.infoPill}>
-                  <Ionicons color={palette.ink} name="albums-outline" size={14} />
-                  <Text style={styles.infoPillText}>{player.cardsRemaining} cards left</Text>
-                </View>
+                {showCardCounts && (
+                  <View style={styles.infoPill}>
+                    <Ionicons color={palette.ink} name="albums-outline" size={14} />
+                    <Text style={styles.infoPillText}>{player.cardsRemaining} cards left</Text>
+                  </View>
+                )}
                 {canRequestCards && (
                   <Pressable
                     accessibilityLabel={`Request all of ${player.name}'s cards`}

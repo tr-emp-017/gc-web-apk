@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { PrimaryButton } from '../../src/components/PrimaryButton';
 import { Screen, palette } from '../../src/components/Screen';
 import { useRoomStore } from '../../src/stores/roomStore';
@@ -32,6 +32,7 @@ export default function BotSetupScreen(): React.JSX.Element {
   const [avatar, setAvatar] = useState<AvatarId>('beard-glasses');
   const [playerCount, setPlayerCount] = useState<BotPlayerCount>(DEFAULT_PLAYER_COUNT);
   const [difficulty, setDifficulty] = useState<BotDifficultyId>(DEFAULT_DIFFICULTY);
+  const [showCardCounts, setShowCardCounts] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
 
   useEffect(() => {
@@ -43,13 +44,13 @@ export default function BotSetupScreen(): React.JSX.Element {
       return;
     }
     if (countdown <= 0) {
-      startBotMatch(name, avatar, playerCount, difficulty);
+      startBotMatch(name, avatar, playerCount, difficulty, showCardCounts);
       router.replace('/game');
       return;
     }
     const timer = setTimeout(() => setCountdown((current) => (current ?? 1) - 1), 1000);
     return () => clearTimeout(timer);
-  }, [countdown, name, avatar, playerCount, difficulty, startBotMatch, router]);
+  }, [countdown, name, avatar, playerCount, difficulty, showCardCounts, startBotMatch, router]);
 
   function updateName(nextName: string): void {
     setName(nextName);
@@ -149,6 +150,14 @@ export default function BotSetupScreen(): React.JSX.Element {
             </Pressable>
           ))}
         </View>
+
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleTextWrap}>
+            <Text style={styles.label}>Show opponents&apos; card counts</Text>
+            <Text style={styles.hint}>Reveal how many cards each bot is holding.</Text>
+          </View>
+          <Switch onValueChange={setShowCardCounts} value={showCardCounts} />
+        </View>
       </View>
 
       <View style={styles.actions}>
@@ -237,6 +246,11 @@ const styles = StyleSheet.create({
   form: {
     marginTop: 32,
   },
+  hint: {
+    color: palette.muted,
+    fontSize: 12,
+    marginTop: 4,
+  },
   input: {
     backgroundColor: palette.white,
     borderColor: '#DED8CC',
@@ -289,5 +303,15 @@ const styles = StyleSheet.create({
     fontSize: 40,
     fontWeight: '900',
     marginTop: 10,
+  },
+  toggleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 24,
+  },
+  toggleTextWrap: {
+    flex: 1,
+    marginRight: 12,
   },
 });

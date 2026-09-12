@@ -80,6 +80,7 @@ type RoomStore = {
     readonly avatar: AvatarId;
     readonly playerCount: BotPlayerCount;
     readonly difficulty: BotDifficultyId;
+    readonly showCardCounts: boolean;
   } | null;
   enterPreviewMode: () => void;
   startBotMatch: (
@@ -87,6 +88,7 @@ type RoomStore = {
     avatar: AvatarId,
     playerCount: BotPlayerCount,
     difficulty: BotDifficultyId,
+    showCardCounts: boolean,
   ) => void;
   connect: () => GameSocket;
   clearError: () => void;
@@ -160,7 +162,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
   // touch the real wallet/entry-points economy. Every mutating action below short-circuits
   // into calls on the BotMatch instance whenever botMode is true, the same way previewMode
   // short-circuits into a local simulation above.
-  startBotMatch: (name, avatar, playerCount, difficulty) => {
+  startBotMatch: (name, avatar, playerCount, difficulty, showCardCounts) => {
     get().botMatch?.destroy();
     const trimmedName = name.trim().slice(0, 24) || 'You';
     const human = { avatar, id: BOT_MATCH_HUMAN_ID, name: trimmedName };
@@ -175,7 +177,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
     const initialState = match.getPublicState();
     set({
       botMatch: match,
-      botMatchSettings: { avatar, difficulty, name: trimmedName, playerCount },
+      botMatchSettings: { avatar, difficulty, name: trimmedName, playerCount, showCardCounts },
       botMode: true,
       error: null,
       gameState: initialState,
@@ -188,7 +190,7 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
         entryPoints: 0,
         hostPlayerId: BOT_MATCH_HUMAN_ID,
         players: initialState.players,
-        showCardCounts: true,
+        showCardCounts,
         status: 'PLAYING',
       },
       transferResolution: null,
@@ -657,7 +659,13 @@ export const useRoomStore = create<RoomStore>((set, get) => ({
       // avatar/difficulty the human picked on the setup screen.
       const settings = get().botMatchSettings;
       if (settings !== null) {
-        get().startBotMatch(settings.name, settings.avatar, settings.playerCount, settings.difficulty);
+        get().startBotMatch(
+          settings.name,
+          settings.avatar,
+          settings.playerCount,
+          settings.difficulty,
+          settings.showCardCounts,
+        );
       }
       return Promise.resolve(true);
     }
