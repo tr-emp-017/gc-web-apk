@@ -1,5 +1,6 @@
-import type { PropsWithChildren } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
+
+import type { PropsWithChildren } from 'react';
 
 type ScreenProps = PropsWithChildren<{ readonly scroll?: boolean }>;
 
@@ -43,9 +44,9 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     flexGrow: 1,
     maxWidth: 480,
-    paddingBottom: 32,
+    paddingBottom: 40,
     paddingHorizontal: 24,
-    paddingTop: 56,
+    paddingTop: 30,
     position: 'relative',
     width: '100%',
   },

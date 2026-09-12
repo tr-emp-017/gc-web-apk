@@ -40,21 +40,6 @@ export default function HomeScreen(): React.JSX.Element {
   return (
     <Screen>
       <View style={styles.topRow}>
-        <View style={styles.headerLeft}>
-          <Image
-            // eslint-disable-next-line @typescript-eslint/no-require-imports -- static image asset
-            source={require('../assets/gadha-hero.jpg')}
-            resizeMode="cover"
-            style={styles.smallIcon}
-          />
-          <View style={styles.headerTextWrap}>
-            <Text style={styles.kicker}>DELHI • NORTH INDIA</Text>
-            <Text onPress={handleTitleTap} style={styles.title}>
-              {'GADHA\nCHOR'}
-            </Text>
-          </View>
-        </View>
-
         {account !== null && (
           <Pressable
             accessibilityLabel="View and edit your profile"
@@ -81,6 +66,13 @@ export default function HomeScreen(): React.JSX.Element {
         )}
       </View>
 
+      <View style={styles.heroWrap}>
+        <Text onPress={handleTitleTap} style={styles.title}>
+          GADHA CHOR
+        </Text>
+        <Text style={styles.kicker}>DELHI • NORTH INDIA</Text>
+      </View>
+
       <View style={styles.linksRow}>
         <Pressable
           accessibilityLabel="View the leaderboard"
@@ -105,6 +97,15 @@ export default function HomeScreen(): React.JSX.Element {
         </Pressable>
       </View>
 
+      <View style={styles.imageWrap}>
+        <Image
+          // eslint-disable-next-line @typescript-eslint/no-require-imports -- static image asset
+          source={require('../assets/gadha-hero.jpg')}
+          resizeMode="cover"
+          style={styles.smallIcon}
+        />
+      </View>
+
       <View style={styles.actions}>
         <PrimaryButton label="Create a room" onPress={() => router.push('/room/create')} />
         <PrimaryButton
@@ -127,7 +128,7 @@ export default function HomeScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   actions: {
     gap: 12,
-    marginTop: 'auto',
+    marginTop: 20,
   },
   footer: {
     color: palette.muted,
@@ -136,20 +137,28 @@ const styles = StyleSheet.create({
     marginTop: 20,
     textAlign: 'center',
   },
-  headerLeft: {
+  heroWrap: {
     alignItems: 'center',
-    flexDirection: 'row',
-    flexShrink: 1,
-    gap: 12,
+    marginTop: 40,
   },
-  headerTextWrap: {
-    flexShrink: 1,
+  topRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 0,
+  },
+  imageWrap: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    marginTop: 24,
   },
   kicker: {
     color: palette.red,
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 1.2,
+    marginTop: 14,
+    textAlign: 'center',
   },
   leaderboardLink: {
     alignItems: 'center',
@@ -170,7 +179,8 @@ const styles = StyleSheet.create({
   linksRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 8,
+    justifyContent: 'center',
+    marginTop: 16,
   },
   profileAvatar: {
     alignSelf: 'center',
@@ -186,7 +196,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    width: 132,
+    width: '100%',
   },
   profileName: {
     color: palette.ink,
@@ -227,22 +237,18 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   smallIcon: {
-    borderRadius: 20,
-    height: 96,
-    width: 96,
+    aspectRatio: 1,
+    borderRadius: 28,
+    height: '100%',
+    maxHeight: 260,
+    maxWidth: 260,
+    width: '100%',
   },
   title: {
     color: palette.ink,
-    fontSize: 38,
+    fontSize: 30,
     fontWeight: '900',
-    lineHeight: 36,
-    marginTop: 6,
-  },
-  topRow: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: 16,
-    justifyContent: 'space-between',
-    marginTop: 12,
+    letterSpacing: 0.5,
+    textAlign: 'center',
   },
 });
